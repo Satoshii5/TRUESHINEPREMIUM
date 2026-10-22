@@ -115,13 +115,7 @@ function shareLead(lead,statusId){
   link.style.cssText="display:inline-flex;align-items:center;justify-content:center;padding:11px 14px;background:#102f27;color:#fff;text-decoration:none;font-weight:700;border:1px solid #b79a65";
   box.append(note,link);
  }
- const popup=window.open(url,"_blank","noopener,noreferrer");
- if(!popup && box){
-  const note=document.createElement("p");
-  note.textContent="Если новая вкладка не открылась, используйте кнопку выше. На телефоне браузер может блокировать всплывающие окна.";
-  note.style.cssText="font-size:11px;margin:9px 0 0";
-  box.appendChild(note);
- }
+ window.open(url,"_blank","noopener,noreferrer");
 }
 async function submitLead(lead,statusId){
  const submitButton=$(statusId)?.closest("form")?.querySelector('button[type="submit"]');
