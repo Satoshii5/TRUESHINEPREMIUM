@@ -55,7 +55,7 @@ export default {
           body: JSON.stringify({
             model: env.OPENAI_MODEL || "gpt-4.1-mini",
             instructions: SYSTEM_PROMPT,
-            input: message,
+            input: Array.isArray(body.history) ? body.history.slice(-10).map(item => ({ role: item.role === "assistant" ? "assistant" : "user", content: String(item.content || "").slice(0, 2000) })).concat([{ role: "user", content: message }]) : message,
             max_output_tokens: 450
           })
         });
