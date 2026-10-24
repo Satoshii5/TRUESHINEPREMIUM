@@ -35,7 +35,32 @@ async function sendTelegram(env, text) {
     if (!response.ok || !result.ok) throw new Error("Telegram delivery failed for destination " + chatId);
   }
 }
+async function notifyCustomer(env, customer, subject, message) {
+  const result = { email: "skipped", telegram: "skipped" };
+  if (customer.email && env.RESEND_API_KEY && env.RESEND_FROM_EMAIL) {
+    try { const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [customer.email], subject, text: message }) }); result.email = r.ok ? "sent" : "failed"; } catch { result.email = "failed"; }
+  }
+  if (customer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
+    try { const r = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: customer.telegram_chat_id, text: message.slice(0, 3900), disable_web_page_preview: true }) }); const data = await r.json(); result.telegram = r.ok && data.ok ? "sent" : "failed"; } catch { result.telegram = "failed"; }
+  }
+  return result;
+}
+async function sendDueReminders(env) {
+  if (!env.DB) return;
+  const now = Date.now(), from = new Date(now).toISOString(), until = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+  const rows = await env.DB.prepare("SELECT o.id,o.service,o.amount_minor,o.currency,o.service_at,c.name,c.email,c.telegram_chat_id FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.status='pending' AND o.reminder_sent_at IS NULL AND o.service_at>? AND o.service_at<=? ORDER BY o.service_at LIMIT 100").bind(from, until).all();
+  for (const o of rows.results || []) {
+    const date = new Date(o.service_at).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" });
+    const amount = (Number(o.amount_minor || 0) / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const msg = "Напоминание TrueShine: завтра запланирована услуга «" + o.service + "» на " + date + " (время Минска). Сумма: " + amount + " " + o.currency + ". Если планы изменились, свяжитесь с нами.";
+    const sent = await notifyCustomer(env, o, "Напоминание о заказе TrueShine", msg);
+    const configured = [o.email && env.RESEND_API_KEY && env.RESEND_FROM_EMAIL, o.telegram_chat_id && env.TELEGRAM_BOT_TOKEN].filter(Boolean).length;
+    const delivered = [sent.email === "sent", sent.telegram === "sent"].filter(Boolean).length;
+    if (configured > 0 && configured === delivered) await env.DB.prepare("UPDATE orders SET reminder_sent_at=? WHERE id=? AND reminder_sent_at IS NULL").bind(new Date().toISOString(), o.id).run();
+  }
+}
 export default {
+  async scheduled(controller, env, ctx) { ctx.waitUntil(sendDueReminders(env)); },
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(origin) });
