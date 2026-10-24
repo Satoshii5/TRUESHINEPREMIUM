@@ -179,7 +179,7 @@ export default {
     }
     if (url.pathname.startsWith("/account/")) {
       if (!env.DB) return json({ error: "Сервис аккаунтов временно недоступен" }, 503, origin);
-      const clean = v => String(v || "").replace(/[\\u0000-\\u001f\\u007f]/g, " ").trim().slice(0, 200);
+      const clean = v => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200);
       const ensureTables = async () => {
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
@@ -204,7 +204,7 @@ export default {
         if (url.pathname === "/account/register" && request.method === "POST") {
           const name = clean(body.name), email = clean(body.email).toLowerCase(), phone = clean(body.phone), password = String(body.password || "");
           const phoneNorm = normalizePhone(phone);
-          if (name.length < 2 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || !/^\\+[1-9]\\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128) return json({ error: "Укажите имя, корректный email, телефон в международном формате и пароль от 10 символов." }, 400, origin);
+          if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\+[1-9]\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128) return json({ error: "Укажите имя, корректный email, телефон в международном формате и пароль от 10 символов." }, 400, origin);
           const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE email=? COLLATE NOCASE OR phone_norm=?").bind(email, phoneNorm).first();
           if (existingAccount) return json({ error: "Аккаунт с таким email или телефоном уже существует. Войдите в аккаунт." }, 409, origin);
           const all = await env.DB.prepare("SELECT id,phone FROM customers WHERE phone IS NOT NULL LIMIT 5000").all();
@@ -232,7 +232,7 @@ export default {
           return json({ ok: true, token: session, customer: { name: account.name, email: account.email, phone: account.phone } }, 200, origin);
         }
         if (url.pathname === "/account/me" && request.method === "GET") {
-          const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+          const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
           if (!raw) return json({ error: "Войдите в аккаунт." }, 401, origin);
           const account = await env.DB.prepare("SELECT a.id,a.email,c.id AS customer_id,c.name,c.phone FROM customer_sessions s JOIN customer_accounts a ON a.id=s.account_id JOIN customers c ON c.id=a.customer_id WHERE s.token_hash=? AND s.expires_at>?").bind(await hashText(raw), new Date().toISOString()).first();
           if (!account) return json({ error: "Сессия истекла. Войдите снова." }, 401, origin);
@@ -240,7 +240,7 @@ export default {
           return json({ ok: true, customer: { name: account.name, email: account.email, phone: account.phone }, orders: orders.results || [] }, 200, origin);
         }
         if (url.pathname === "/account/logout" && request.method === "POST") {
-          const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+          const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
           if (raw) await env.DB.prepare("DELETE FROM customer_sessions WHERE token_hash=?").bind(await hashText(raw)).run();
           return json({ ok: true }, 200, origin);
         }
@@ -306,7 +306,7 @@ export default {
           const amount = Number(body.amount), rawServiceAt = String(body.serviceAt || "");
           const serviceAtDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawServiceAt) ? new Date(rawServiceAt + ":00+03:00") : new Date(NaN);
           if (!customerId || !service || service.length > 200 || !Number.isFinite(amount) || amount < 0 || amount > 100000000 || !Number.isFinite(serviceAtDate.getTime()) || serviceAtDate.getTime() <= Date.now()) return json({ error: "Укажите клиента, услугу, корректную сумму и будущие дату/время начала (время Минска)" }, 400, origin);
-          const customer = await env.DB.prepare("SELECT id,name,email,telegram_chat_id FROM customers WHERE id=?").bind(customerId).first();
+          const customer = await env.DB.prepare("SELECT id,name,phone,email,telegram_chat_id FROM customers WHERE id=?").bind(customerId).first();
           if (!customer) return json({ error: "Customer not found" }, 404, origin);
           const id = crypto.randomUUID(), now = new Date().toISOString(), serviceAt = serviceAtDate.toISOString(), amountMinor = Math.round(amount*100);
           await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) VALUES (?,?,?,?,?,'pending',?,NULL,?,NULL)").bind(id,customerId,service,amountMinor,currency,now,serviceAt).run();
