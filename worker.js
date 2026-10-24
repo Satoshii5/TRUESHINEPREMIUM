@@ -365,6 +365,7 @@ export default {
           if (order.status === "cancelled" && status !== "cancelled") return json({ error: "Отменённый заказ нельзя возобновить через эту кнопку." }, 409, origin);
           if (order.status === status) return json({ ok: true, id: orderId, status, notifications: { email: "skipped", telegram: "skipped", group: "skipped" } }, 200, origin);
           await env.DB.prepare("UPDATE orders SET status=? WHERE id=?").bind(status, orderId).run();
+          await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_order_loyalty (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, points_used INTEGER NOT NULL DEFAULT 0, refunded_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
           if(status==="cancelled" && order.status!=="cancelled") {
             const reservation=await env.DB.prepare("SELECT customer_id,points_used,refunded_at FROM customer_order_loyalty WHERE order_id=?").bind(orderId).first();
             if(reservation && Number(reservation.points_used)>0 && !reservation.refunded_at) {
