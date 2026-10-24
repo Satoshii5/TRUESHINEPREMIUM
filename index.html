@@ -74,7 +74,6 @@
 (function(){
 "use strict";
 const API_ENDPOINT = "https://trueshine-telegram-leads.manjiros471.workers.dev"; // Cloudflare Worker; секреты хранятся только в Cloudflare.
-const TELEGRAM_SHARE = "https://t.me/share/url";
 const $ = id => document.getElementById(id);
 $("year").textContent = new Date().getFullYear();
 const rates = {express:2.75,standard:3.75,general:5.25,post:6.5,kitchen:0,fire:6.25};
@@ -116,39 +115,23 @@ menu.addEventListener("click",()=>{const opened=nav.classList.toggle("open");men
 nav.querySelectorAll("a").forEach(a=>a.addEventListener("click",()=>{nav.classList.remove("open");menu.setAttribute("aria-expanded","false");menu.textContent="☰";}));
 function showStatus(id,text){const el=$(id);if(el){el.textContent=text;el.style.display="block";}}
 function buildLead(kind,data){return {kind, ...data, page:location.href, createdAt:new Date().toISOString()};}
-function shareLead(lead,statusId){
- const lines=["ЗАЯВКА TRUE SHINE","Тип: "+(lead.kind||"Клиент"),"Имя: "+(lead.name||"—"),"Телефон: "+(lead.phone||"—"),"Клиент: "+(lead.audience||"—"),"Услуга: "+(lead.service||"—"),"Комментарий: "+(lead.details||"—"),"Страница: "+location.href];
- const text=lines.join("\n").slice(0,1800);
- const url=TELEGRAM_SHARE+"?url="+encodeURIComponent(location.href)+"&text="+encodeURIComponent(text);
- const box=$(statusId);
- if(box){
-  box.replaceChildren();
-  box.style.display="block";
-  const note=document.createElement("p");
-  note.textContent="Заявка подготовлена, но ещё не отправлена автоматически. Нажмите кнопку ниже, затем выберите чат TrueShine и нажмите «Отправить» в Telegram.";
-  note.style.margin="0 0 10px";
-  const link=document.createElement("a");
-  link.href=url;link.target="_blank";link.rel="noopener noreferrer";
-  link.textContent="Открыть Telegram и отправить заявку ↗";
-  link.style.cssText="display:inline-flex;align-items:center;justify-content:center;padding:11px 14px;background:#102f27;color:#fff;text-decoration:none;font-weight:700;border:1px solid #b79a65";
-  box.append(note,link);
- }
- window.open(url,"_blank","noopener,noreferrer");
-}
 async function submitLead(lead,statusId){
- const submitButton=$(statusId)?.closest("form")?.querySelector('button[type="submit"]');
- if(submitButton){submitButton.disabled=true;submitButton.dataset.originalText=submitButton.textContent;submitButton.textContent="Готовим заявку…";}
+ const form=$(statusId)?.closest("form");
+ const submitButton=form?.querySelector('button[type="submit"]');
+ if(submitButton){submitButton.disabled=true;submitButton.dataset.originalText=submitButton.textContent;submitButton.textContent="Отправляем…";}
+ showStatus(statusId,"Отправляем заявку напрямую в Telegram…");
  try{
-  if(API_ENDPOINT){
-   try{
-    const res=await fetch(API_ENDPOINT.replace(/\/$/,"")+"/lead",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(lead)});
-    const data=await res.json().catch(()=>({}));
-    if(!res.ok||!data.ok)throw new Error(data.error||("HTTP "+res.status));
-    showStatus(statusId,"Заявка успешно доставлена в Telegram. Спасибо! Мы свяжемся с вами.");
-    return true;
-   }catch(e){console.error("Lead API error",e);}
-  }
-  shareLead(lead,statusId);return false;
+  if(!API_ENDPOINT)throw new Error("Не настроен сервер отправки заявок.");
+  const res=await fetch(API_ENDPOINT.replace(/\\/$/,"")+"/lead",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(lead)});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok||!data.ok)throw new Error(data.error||("Ошибка сервера: "+res.status));
+  showStatus(statusId,"Заявка успешно отправлена в Telegram. Спасибо! Мы свяжемся с вами.");
+  form?.reset();
+  return true;
+ }catch(e){
+  console.error("Lead API error",e);
+  showStatus(statusId,"Не удалось автоматически отправить заявку. Telegram не открывался, заявка не отправлена. Попробуйте ещё раз позже или свяжитесь с нами по телефону +375 25 908-51-27.");
+  return false;
  }finally{
   if(submitButton){submitButton.disabled=false;submitButton.textContent=submitButton.dataset.originalText||"Отправить заявку";}
  }
