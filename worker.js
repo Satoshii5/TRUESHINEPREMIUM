@@ -35,6 +35,58 @@ async function sendTelegram(env, text) {
     if (!response.ok || !result.ok) throw new Error("Telegram delivery failed for destination " + chatId);
   }
 }
+async function sendTelegramChat(env, chatId, text, replyMarkup) {
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error("Telegram bot is not configured");
+  const payload = { chat_id: String(chatId), text: String(text).slice(0, 3900), disable_web_page_preview: true };
+  if (replyMarkup) payload.reply_markup = replyMarkup;
+  const response = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error("Telegram sendMessage failed");
+  return result;
+}
+function normalizePhone(value) {
+  return String(value || "").replace(/[^0-9]/g, "").replace(/^00/, "");
+}
+async function handleTelegramWebhook(request, env, update) {
+  if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  if (!env.DB) return new Response("Database unavailable", { status: 503 });
+  const message = update && update.message;
+  if (!message || !message.chat || message.chat.type !== "private" || !message.from) return new Response("ok", { status: 200 });
+  const chatId = String(message.chat.id);
+  const text = String(message.text || "").trim();
+  const start = /^\/start(?:@\w+)?(?:\s|$)/i.test(text);
+  if (start) {
+    await sendTelegramChat(env, chatId,
+      "Здравствуйте! Чтобы связать Telegram с вашим аккаунтом TrueShine, нажмите кнопку «Поделиться номером». Номер должен совпадать с указанным при оформлении заказа.",
+      { keyboard: [[{ text: "Поделиться моим номером", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true }
+    );
+    return new Response("ok", { status: 200 });
+  }
+  if (message.contact) {
+    const contact = message.contact;
+    if (!contact.user_id || Number(contact.user_id) !== Number(message.from.id)) {
+      await sendTelegramChat(env, chatId, "Пожалуйста, поделитесь именно своим номером через кнопку внизу экрана.");
+      return new Response("ok", { status: 200 });
+    }
+    const submittedPhone = normalizePhone(contact.phone_number);
+    const result = await env.DB.prepare("SELECT id,phone FROM customers WHERE phone IS NOT NULL LIMIT 5000").all();
+    const customer = (result.results || []).find(c => normalizePhone(c.phone) === submittedPhone);
+    if (!customer) {
+      await sendTelegramChat(env, chatId, "Не нашёл клиента с таким номером в базе TrueShine. Проверьте, что вы отправили тот же номер, который указывали при обращении, или свяжитесь с нами для помощи.");
+      return new Response("ok", { status: 200 });
+    }
+    await env.DB.prepare("UPDATE customers SET telegram_chat_id=?,updated_at=? WHERE id=?")
+      .bind(chatId, new Date().toISOString(), customer.id).run();
+    await sendTelegramChat(env, chatId, "Готово! Telegram привязан к вашему профилю TrueShine. Теперь сюда могут приходить подтверждения заказов, напоминания и уведомления об оплате.", { remove_keyboard: true });
+    return new Response("ok", { status: 200 });
+  }
+  await sendTelegramChat(env, chatId, "Чтобы привязать аккаунт TrueShine, отправьте /start и нажмите «Поделиться моим номером».");
+  return new Response("ok", { status: 200 });
+}
 async function notifyCustomer(env, customer, subject, message) {
   const result = { email: "skipped", telegram: "skipped" };
   if (customer.email && env.RESEND_API_KEY && env.RESEND_FROM_EMAIL) {
@@ -70,6 +122,10 @@ export default {
     if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ error: "Origin not allowed" }, 403, origin);
     let body = {};
     if (request.method === "POST") { try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400, origin); } }
+    if (url.pathname === "/telegram/webhook" && request.method === "POST") {
+      try { return await handleTelegramWebhook(request, env, body); }
+      catch { return new Response("Temporary error", { status: 500 }); }
+    }
     if (url.pathname.endsWith("/chat")) {
       const message = String(body.message || "").trim().slice(0, 2000);
       if (!message) return json({ error: "Message is required" }, 400, origin);
@@ -127,8 +183,19 @@ export default {
       if (!env.DB) return json({ error: "CRM database is not configured. Add D1 binding named DB." }, 503, origin);
       const safe = v => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 1000);
       try {
+        if (url.pathname === "/crm/telegram/setup-webhook" && request.method === "POST") {
+          if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) return json({ error: "Add TELEGRAM_WEBHOOK_SECRET in Worker secrets before connecting the bot." }, 400, origin);
+          const webhookUrl = url.origin + "/telegram/webhook";
+          const response = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/setWebhook", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: webhookUrl, secret_token: env.TELEGRAM_WEBHOOK_SECRET, allowed_updates: ["message"] })
+          });
+          const result = await response.json();
+          if (!response.ok || !result.ok) return json({ error: "Telegram rejected the webhook configuration. Check bot token and secret format." }, 502, origin);
+          return json({ ok: true, message: "Telegram webhook connected." }, 200, origin);
+        }
         if (url.pathname === "/crm/customers" && request.method === "GET") {
-          const result = await env.DB.prepare("SELECT id,name,phone,email,language,notes,sms_consent,points,paid_orders,client_status,discount_percent,created_at,updated_at FROM customers ORDER BY created_at DESC LIMIT 1000").all();
+          const result = await env.DB.prepare("SELECT id,name,phone,email,telegram_chat_id,language,notes,sms_consent,points,paid_orders,client_status,discount_percent,created_at,updated_at FROM customers ORDER BY created_at DESC LIMIT 1000").all();
           const customers = (result.results || []).map(c => ({...c, sms_consent: !!c.sms_consent, tier: Number(c.paid_orders)>=10?"VIP":Number(c.paid_orders)>=3?"Silver":"Start"}));
           const counts = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM orders) AS ordersCount, (SELECT COUNT(*) FROM sms_outbox WHERE status='queued') AS smsQueued").first();
           return json({ customers, ordersCount: counts?.ordersCount || 0, smsQueued: counts?.smsQueued || 0 }, 200, origin);
