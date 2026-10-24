@@ -238,19 +238,36 @@ export default {
           await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) VALUES (?,?,?,?,?,'pending',?,NULL,?,NULL)").bind(id,customerId,service,amountMinor,currency,now,serviceAt).run();
           const dateText = new Date(serviceAt).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" });
           const amountText = (amountMinor/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2});
-          const notice = await notifyCustomer(env, customer, "Заказ TrueShine подтверждён", "Здравствуйте, " + customer.name + "! Ваш заказ TrueShine создан. Услуга: " + service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + currency + ". Статус оплаты: ожидает оплаты.");
-          return json({ ok: true, id, notifications: notice, message: "Order created" }, 201, origin);
+          const customerMessage = "Здравствуйте, " + customer.name + "! Ваш заказ TrueShine создан. Услуга: " + service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + currency + ". Статус: Новый, ожидает подтверждения и оплаты.";
+          const notice = await notifyCustomer(env, customer, "Новый заказ TrueShine", customerMessage);
+          let group = "failed";
+          try {
+            await sendTelegram(env, "🆕 НОВЫЙ ЗАКАЗ TRUE SHINE\nЗаказ: " + id + "\nКлиент: " + customer.name + "\nТелефон: " + (customer.phone || "не указан") + "\nУслуга: " + service + "\nДата: " + dateText + " (Минск)\nСумма: " + amountText + " " + currency + "\nСтатус: Новый");
+            group = "sent";
+          } catch {}
+          return json({ ok: true, id, notifications: { ...notice, group }, message: "Order created" }, 201, origin);
         }
         if (url.pathname === "/crm/orders/status" && request.method === "POST") {
           const orderId = safe(body.orderId), status = String(body.status || "");
           const allowedStatuses = ["pending","confirmed","in_progress","completed","cancelled"];
           if (!orderId || !allowedStatuses.includes(status)) return json({ error: "Укажите заказ и допустимый статус" }, 400, origin);
-          const order = await env.DB.prepare("SELECT id,status FROM orders WHERE id=?").bind(orderId).first();
+          const order = await env.DB.prepare("SELECT o.id,o.status,o.service,o.service_at,o.amount_minor,o.currency,c.id AS customer_id,c.name,c.phone,c.email,c.telegram_chat_id FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=?").bind(orderId).first();
           if (!order) return json({ error: "Заказ не найден" }, 404, origin);
           if (order.status === "paid") return json({ error: "Оплаченный заказ нельзя изменить. Для исправления обратитесь к администратору." }, 409, origin);
           if (order.status === "cancelled" && status !== "cancelled") return json({ error: "Отменённый заказ нельзя возобновить через эту кнопку." }, 409, origin);
+          if (order.status === status) return json({ ok: true, id: orderId, status, notifications: { email: "skipped", telegram: "skipped", group: "skipped" } }, 200, origin);
           await env.DB.prepare("UPDATE orders SET status=? WHERE id=?").bind(status, orderId).run();
-          return json({ ok: true, id: orderId, status }, 200, origin);
+          const names = { pending: "Новый", confirmed: "Подтверждён", in_progress: "В работе", completed: "Выполнен", cancelled: "Отменён", paid: "Оплачен" };
+          const dateText = order.service_at ? new Date(order.service_at).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" }) : "не указаны";
+          const amountText = (Number(order.amount_minor || 0) / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const message = "Здравствуйте, " + order.name + "! Статус вашего заказа TrueShine изменён: «" + (names[order.status] || order.status) + "» → «" + names[status] + "». Услуга: " + order.service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + order.currency + ".";
+          const notifications = await notifyCustomer(env, order, "Изменение статуса заказа TrueShine: " + names[status], message);
+          let group = "failed";
+          try {
+            await sendTelegram(env, "🔔 ИЗМЕНЕНИЕ СТАТУСА ЗАКАЗА TRUE SHINE\nЗаказ: " + order.id + "\nКлиент: " + order.name + "\nТелефон: " + order.phone + "\nУслуга: " + order.service + "\nДата: " + dateText + " (Минск)\nСумма: " + amountText + " " + order.currency + "\nСтатус: " + (names[order.status] || order.status) + " → " + names[status]);
+            group = "sent";
+          } catch {}
+          return json({ ok: true, id: orderId, status, notifications: { ...notifications, group } }, 200, origin);
         }
         if (url.pathname === "/crm/orders/paid" && request.method === "POST") {
           const orderId = safe(body.orderId);
@@ -260,8 +277,10 @@ export default {
           if (order.status !== "paid") { const now = new Date().toISOString(); await env.DB.prepare("UPDATE orders SET status='paid',paid_at=? WHERE id=?").bind(now,orderId).run(); await env.DB.prepare("UPDATE customers SET paid_orders=paid_orders+1,updated_at=? WHERE id=?").bind(now,order.customer_id).run(); }
           const amountText = (Number(order.amount_minor||0)/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2});
           const dateText = order.service_at ? new Date(order.service_at).toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}) : "не указаны";
-          const notice = await notifyCustomer(env, order, "Оплата заказа TrueShine получена", "Здравствуйте, " + order.name + "! Оплата вашего заказа TrueShine получена. Услуга: " + order.service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + order.currency + ". Спасибо за выбор TrueShine!");
-          return json({ ok: true, notifications: notice, message: "Payment marked as paid" }, 200, origin);
+          const notice = await notifyCustomer(env, order, "Заказ TrueShine оплачен", "Здравствуйте, " + order.name + "! Оплата вашего заказа TrueShine получена. Статус: Оплачен. Услуга: " + order.service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + order.currency + ". Спасибо за выбор TrueShine!");
+          let group = "failed";
+          try { await sendTelegram(env, "💳 ЗАКАЗ ОПЛАЧЕН — TRUE SHINE\nЗаказ: " + order.id + "\nКлиент: " + order.name + "\nУслуга: " + order.service + "\nДата: " + dateText + " (Минск)\nСумма: " + amountText + " " + order.currency + "\nСтатус: Оплачен"); group = "sent"; } catch {}
+          return json({ ok: true, notifications: { ...notice, group }, message: "Payment marked as paid" }, 200, origin);
         }
         if (url.pathname === "/crm/sms" && request.method === "POST") {
           const customerId=safe(body.customerId), message=safe(body.message), category=body.category==="marketing"?"marketing":"service";
