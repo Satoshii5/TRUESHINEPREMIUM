@@ -183,6 +183,7 @@ export default {
       const ensureTables = async () => {
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_loyalty (customer_id TEXT PRIMARY KEY, card_number TEXT NOT NULL UNIQUE, points INTEGER NOT NULL DEFAULT 0, lifetime_points INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
       };
       const hashText = async value => {
         const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -221,6 +222,8 @@ export default {
           const accountId = crypto.randomUUID(), salt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
           await env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)")
             .bind(accountId, customer.id, email, phoneNorm, salt, await passwordHash(password, salt), now).run();
+          const cardNumber = "TS-" + Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
+          await env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(customer.id,cardNumber,now).run();
           const session = await issueSession(accountId);
           return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email, phone } }, 201, origin);
         }
@@ -234,10 +237,39 @@ export default {
         if (url.pathname === "/account/me" && request.method === "GET") {
           const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
           if (!raw) return json({ error: "Войдите в аккаунт." }, 401, origin);
-          const account = await env.DB.prepare("SELECT a.id,a.email,c.id AS customer_id,c.name,c.phone FROM customer_sessions s JOIN customer_accounts a ON a.id=s.account_id JOIN customers c ON c.id=a.customer_id WHERE s.token_hash=? AND s.expires_at>?").bind(await hashText(raw), new Date().toISOString()).first();
+          const account = await env.DB.prepare("SELECT a.id,a.email,c.id AS customer_id,c.name,c.phone,c.discount_percent FROM customer_sessions s JOIN customer_accounts a ON a.id=s.account_id JOIN customers c ON c.id=a.customer_id WHERE s.token_hash=? AND s.expires_at>?").bind(await hashText(raw), new Date().toISOString()).first();
           if (!account) return json({ error: "Сессия истекла. Войдите снова." }, 401, origin);
+          let loyalty = await env.DB.prepare("SELECT card_number,points,lifetime_points FROM customer_loyalty WHERE customer_id=?").bind(account.customer_id).first();
+          if (!loyalty) { const cardNumber = "TS-" + Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase(); await env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(account.customer_id,cardNumber,new Date().toISOString()).run(); loyalty = await env.DB.prepare("SELECT card_number,points,lifetime_points FROM customer_loyalty WHERE customer_id=?").bind(account.customer_id).first(); }
           const orders = await env.DB.prepare("SELECT id,service,amount_minor,currency,status,created_at,service_at,paid_at FROM orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 100").bind(account.customer_id).all();
-          return json({ ok: true, customer: { name: account.name, email: account.email, phone: account.phone }, orders: orders.results || [] }, 200, origin);
+          return json({ ok: true, customer: { name: account.name, email: account.email, phone: account.phone }, loyalty: { card_number: loyalty.card_number, points: loyalty.points, lifetime_points: loyalty.lifetime_points, discount_percent: Number(account.discount_percent||0), point_value_byn: 1, max_redemption_percent: 20, earn_rule: "1 балл за каждые 20 BYN оплаченного заказа" }, orders: orders.results || [] }, 200, origin);
+        }
+        if (url.pathname === "/account/orders" && request.method === "POST") {
+          const raw=(request.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
+          if(!raw) return json({error:"Войдите в личный кабинет."},401,origin);
+          const account=await env.DB.prepare("SELECT c.id AS customer_id,c.name,c.phone,c.email,c.telegram_chat_id,c.discount_percent FROM customer_sessions s JOIN customer_accounts a ON a.id=s.account_id JOIN customers c ON c.id=a.customer_id WHERE s.token_hash=? AND s.expires_at>?").bind(await hashText(raw),new Date().toISOString()).first();
+          if(!account) return json({error:"Сессия истекла. Войдите снова."},401,origin);
+          const key=String(body.service||""),area=Number(body.area||0),address=clean(body.address),comment=clean(body.comment),rawDate=String(body.serviceAt||"");
+          const date=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawDate)?new Date(rawDate+":00+03:00"):new Date(NaN);
+          if(address.length<5||!Number.isFinite(date.getTime())||date.getTime()<=Date.now()) return json({error:"Укажите адрес и будущие дату и время (время Минска)."},400,origin);
+          const rules={express:["Экспресс-уборка",2.75,88],maintenance:["Поддерживающая уборка",3.75,0],general:["Генеральная уборка",5.25,125],renovation:["Уборка после ремонта",6.5,250],fire:["Уборка после пожара",6.25,375],kitchen:["Генеральная уборка кухни",0,200],subscription_basic:["Подписка «Базовый»",0,224],subscription_comfort:["Подписка «Комфорт»",0,388],subscription_premium:["Подписка «Премиум»",0,714]};
+          const rule=rules[key]; if(!rule&&!["upholstery","carpet","business","other"].includes(key)) return json({error:"Выберите услугу из списка."},400,origin);
+          if(rule&&rule[1]>0&&(!Number.isFinite(area)||area<1||area>10000)) return json({error:"Укажите площадь от 1 до 10000 м²."},400,origin);
+          const base=rule?(rule[1]>0?Math.max(rule[2],rule[1]*area):rule[2]):0;
+          const pct=Math.max(0,Math.min(50,Number(account.discount_percent||0))),afterDiscount=Math.round(base*(100-pct))/100;
+          let loyalty=await env.DB.prepare("SELECT points FROM customer_loyalty WHERE customer_id=?").bind(account.customer_id).first();
+          if(!loyalty){const card="TS-"+Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();await env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(account.customer_id,card,new Date().toISOString()).run();loyalty=await env.DB.prepare("SELECT points FROM customer_loyalty WHERE customer_id=?").bind(account.customer_id).first();}
+          const used=body.usePoints===true?Math.min(Number(loyalty.points||0),Math.floor(afterDiscount*.2)):0,final=Math.max(0,Math.round((afterDiscount-used)*100)/100);
+          const title=rule?rule[0]:({upholstery:"Химчистка мебели",carpet:"Чистка ковролина",business:"Комплексный клининг / обслуживание бизнеса",other:"Другая услуга"}[key]);
+          const service=title+(rule&&rule[1]>0?" — "+area+" м²":"")+"\nАдрес: "+address+(comment?"\nКомментарий: "+comment:"")+(base?"\nПредварительная цена: "+base.toFixed(2)+" BYN; персональная скидка "+pct+"%; списано баллов "+used+". Цена уточняется менеджером.":"\nСтоимость уточнит менеджер.");
+          const id=crypto.randomUUID(),now=new Date().toISOString(),serviceAt=date.toISOString();
+          await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) VALUES (?,?,?,?,?,'pending',?,NULL,?,NULL)").bind(id,account.customer_id,service,Math.round(final*100),"BYN",now,serviceAt).run();
+          if(used>0) await env.DB.prepare("UPDATE customer_loyalty SET points=points-? WHERE customer_id=? AND points>=?").bind(used,account.customer_id,used).run();
+          const dateText=date.toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}),price=base?final.toLocaleString("ru-RU",{minimumFractionDigits:2})+" BYN (предварительно)":"уточняется";
+          const msg="Получена ваша заявка TrueShine. Услуга: "+title+". Дата: "+dateText+" (Минск). Стоимость: "+price+". Статус: новая, ожидает подтверждения.";
+          const notice=await notifyCustomer(env,account,"Заявка TrueShine получена",msg);let group="failed";
+          try{await sendTelegram(env,"🆕 ЗАКАЗ ИЗ ЛИЧНОГО КАБИНЕТА TRUE SHINE\nНомер: "+id+"\nКлиент: "+account.name+"\nТелефон: "+account.phone+"\nУслуга: "+title+"\nАдрес: "+address+"\nДата: "+dateText+" (Минск)\nСтоимость: "+price+"\nСкидка: "+pct+"%\nСписано баллов: "+used+"\nКомментарий: "+(comment||"—"));group="sent";}catch{}
+          return json({ok:true,id,notifications:{...notice,group},pricing:{base,discountPercent:pct,pointsUsed:used,finalAmount:final,quoteRequired:!base}},201,origin);
         }
         if (url.pathname === "/account/logout" && request.method === "POST") {
           const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -348,7 +380,7 @@ export default {
           if (!orderId) return json({ error: "Order ID is required" }, 400, origin);
           const order = await env.DB.prepare("SELECT o.id,o.status,o.service,o.service_at,o.amount_minor,o.currency,c.id AS customer_id,c.name,c.email,c.telegram_chat_id FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=?").bind(orderId).first();
           if (!order) return json({ error: "Order not found" }, 404, origin);
-          if (order.status !== "paid") { const now = new Date().toISOString(); await env.DB.prepare("UPDATE orders SET status='paid',paid_at=? WHERE id=?").bind(now,orderId).run(); await env.DB.prepare("UPDATE customers SET paid_orders=paid_orders+1,updated_at=? WHERE id=?").bind(now,order.customer_id).run(); }
+          if (order.status !== "paid") { const now = new Date().toISOString(); await env.DB.prepare("UPDATE orders SET status='paid',paid_at=? WHERE id=?").bind(now,orderId).run(); await env.DB.prepare("UPDATE customers SET paid_orders=paid_orders+1,updated_at=? WHERE id=?").bind(now,order.customer_id).run(); await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_loyalty (customer_id TEXT PRIMARY KEY, card_number TEXT NOT NULL UNIQUE, points INTEGER NOT NULL DEFAULT 0, lifetime_points INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run(); let loyalty=await env.DB.prepare("SELECT card_number,points FROM customer_loyalty WHERE customer_id=?").bind(order.customer_id).first(); if(!loyalty){const card="TS-"+Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();await env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(order.customer_id,card,now).run();} const earned=Math.floor((Number(order.amount_minor||0)/100)/20); if(earned>0) await env.DB.prepare("UPDATE customer_loyalty SET points=points+?,lifetime_points=lifetime_points+? WHERE customer_id=?").bind(earned,earned,order.customer_id).run(); }
           const amountText = (Number(order.amount_minor||0)/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2});
           const dateText = order.service_at ? new Date(order.service_at).toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}) : "не указаны";
           const notice = await notifyCustomer(env, order, "Заказ TrueShine оплачен", "Здравствуйте, " + order.name + "! Оплата вашего заказа TrueShine получена. Статус: Оплачен. Услуга: " + order.service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + order.currency + ". Спасибо за выбор TrueShine!");
