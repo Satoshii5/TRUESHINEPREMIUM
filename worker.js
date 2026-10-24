@@ -100,7 +100,7 @@ async function notifyCustomer(env, customer, subject, message) {
 async function sendDueReminders(env) {
   if (!env.DB) return;
   const now = Date.now(), from = new Date(now).toISOString(), until = new Date(now + 24 * 60 * 60 * 1000).toISOString();
-  const rows = await env.DB.prepare("SELECT o.id,o.service,o.amount_minor,o.currency,o.service_at,c.name,c.email,c.telegram_chat_id FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.status='pending' AND o.reminder_sent_at IS NULL AND o.service_at>? AND o.service_at<=? ORDER BY o.service_at LIMIT 100").bind(from, until).all();
+  const rows = await env.DB.prepare("SELECT o.id,o.service,o.amount_minor,o.currency,o.service_at,c.name,c.email,c.telegram_chat_id FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.status IN ('pending','confirmed','in_progress') AND o.reminder_sent_at IS NULL AND o.service_at>? AND o.service_at<=? ORDER BY o.service_at LIMIT 100").bind(from, until).all();
   for (const o of rows.results || []) {
     const date = new Date(o.service_at).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" });
     const amount = (Number(o.amount_minor || 0) / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
