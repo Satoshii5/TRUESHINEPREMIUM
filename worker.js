@@ -184,6 +184,7 @@ export default {
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_loyalty (customer_id TEXT PRIMARY KEY, card_number TEXT NOT NULL UNIQUE, points INTEGER NOT NULL DEFAULT 0, lifetime_points INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_order_loyalty (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, points_used INTEGER NOT NULL DEFAULT 0, refunded_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
       };
       const hashText = async value => {
         const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -264,6 +265,7 @@ export default {
           const service=title+(rule&&rule[1]>0?" — "+area+" м²":"")+"\nАдрес: "+address+(comment?"\nКомментарий: "+comment:"")+(base?"\nПредварительная цена: "+base.toFixed(2)+" BYN; персональная скидка "+pct+"%; списано баллов "+used+". Цена уточняется менеджером.":"\nСтоимость уточнит менеджер.");
           const id=crypto.randomUUID(),now=new Date().toISOString(),serviceAt=date.toISOString();
           await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) VALUES (?,?,?,?,?,'pending',?,NULL,?,NULL)").bind(id,account.customer_id,service,Math.round(final*100),"BYN",now,serviceAt).run();
+          await env.DB.prepare("INSERT INTO customer_order_loyalty (order_id,customer_id,points_used,refunded_at,created_at) VALUES (?,?,?,NULL,?)").bind(id,account.customer_id,used,now).run();
           if(used>0) await env.DB.prepare("UPDATE customer_loyalty SET points=points-? WHERE customer_id=? AND points>=?").bind(used,account.customer_id,used).run();
           const dateText=date.toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}),price=base?final.toLocaleString("ru-RU",{minimumFractionDigits:2})+" BYN (предварительно)":"уточняется";
           const msg="Получена ваша заявка TrueShine. Услуга: "+title+". Дата: "+dateText+" (Минск). Стоимость: "+price+". Статус: новая, ожидает подтверждения.";
@@ -363,6 +365,13 @@ export default {
           if (order.status === "cancelled" && status !== "cancelled") return json({ error: "Отменённый заказ нельзя возобновить через эту кнопку." }, 409, origin);
           if (order.status === status) return json({ ok: true, id: orderId, status, notifications: { email: "skipped", telegram: "skipped", group: "skipped" } }, 200, origin);
           await env.DB.prepare("UPDATE orders SET status=? WHERE id=?").bind(status, orderId).run();
+          if(status==="cancelled" && order.status!=="cancelled") {
+            const reservation=await env.DB.prepare("SELECT customer_id,points_used,refunded_at FROM customer_order_loyalty WHERE order_id=?").bind(orderId).first();
+            if(reservation && Number(reservation.points_used)>0 && !reservation.refunded_at) {
+              await env.DB.prepare("UPDATE customer_loyalty SET points=points+? WHERE customer_id=?").bind(reservation.points_used,reservation.customer_id).run();
+              await env.DB.prepare("UPDATE customer_order_loyalty SET refunded_at=? WHERE order_id=? AND refunded_at IS NULL").bind(new Date().toISOString(),orderId).run();
+            }
+          }
           const names = { pending: "Новый", confirmed: "Подтверждён", in_progress: "В работе", completed: "Выполнен", cancelled: "Отменён", paid: "Оплачен" };
           const dateText = order.service_at ? new Date(order.service_at).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" }) : "не указаны";
           const amountText = (Number(order.amount_minor || 0) / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
