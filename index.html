@@ -48,7 +48,8 @@
 <label class="check-row"><input type="checkbox" id="addonFurniture"> <span>Химчистка мебели или ковролина</span></label>
 <label class="check-row"><input type="checkbox" id="addonInside"> <span>Очистка внутри шкафов / техники</span></label>
 <label class="check-row"><input type="checkbox" id="addonOven"> <span>Помыть духовку <strong>+30 BYN</strong></span></label>
-<label class="check-row"><input type="checkbox" id="addonFridge"> <span>Помыть холодильник <strong>+30 BYN</strong></span></label></div></div>
+<label class="check-row"><input type="checkbox" id="addonFridge"> <span>Помыть холодильник <strong>+30 BYN</strong></span></label>
+<label class="check-row"><input type="checkbox" id="addonBathroomWalls"> <span>Мытьё стен в ванной <strong>+55 BYN</strong></span></label></div></div>
 <div class="field full"><label for="calcBathroom">Уборка санузла</label><select id="calcBathroom"><option value="0">Не требуется</option><option value="80">Стандартная уборка санузла — 80 BYN</option><option value="150">Генеральная уборка санузла — 150 BYN</option></select></div>
 <div class="field full"><label for="calcKitchenDeep">Генеральная уборка кухни</label><select id="calcKitchenDeep"><option value="0">Не требуется</option><option value="150">Отдельная услуга — от 150 BYN</option></select></div>
 <div class="field full"><label>Химчистка мебели</label>
@@ -84,7 +85,7 @@ function calculate(){
  const type=$("calcType").value, area=Math.max(0,Number($("calcArea").value||0));
  const condition=Number($("calcCondition").value), frequency=Number($("calcFrequency").value);
  const percentAddons=[$("addonWindows").checked,$("addonFurniture").checked,$("addonInside").checked].filter(Boolean).length;
- const oven=$("addonOven").checked?30:0, fridge=$("addonFridge").checked?30:0;
+ const oven=$("addonOven").checked?30:0, fridge=$("addonFridge").checked?30:0, bathroomWalls=$("addonBathroomWalls").checked?55:0;
  const bathroom=Number($("calcBathroom").value||0), kitchenDeep=Number($("calcKitchenDeep").value||0);
  const chairs=Math.max(0,Math.floor(Number($("chairCount").value||0))), sofas=Math.max(0,Math.floor(Number($("sofaCount").value||0))), mattress=Number($("mattressType").value||0);
  const progressiveTotal=(count,base)=>{let sum=0,price=base;for(let i=0;i<count;i++){sum+=price;price*=1.25;}return sum;};
@@ -93,19 +94,19 @@ function calculate(){
  if(type==="kitchen"){base=area>0?Math.max(150,150+(area-8)*2.5):0;description="Генеральная уборка кухни: от 150 BYN";}
  else if(type==="fire"){base=area>0?Math.max(300,area*5):0;description="Ориентир 5 BYN/м², минимум 300 BYN";}
  else {base=area*rates[type];if(type==="express")base=Math.max(88,base);if(type==="general")base=Math.max(125,base);if(type==="post")base=Math.max(250,base);description=area+" м² × "+rates[type]+" BYN/м²";}
- total=base*condition*frequency*(1+percentAddons*.2)+oven+fridge+bathroom+kitchenDeep+furniture;
+ total=base*condition*frequency*(1+percentAddons*.2)+oven+fridge+bathroomWalls+bathroom+kitchenDeep+furniture;
  if(type==="kitchen"||type==="fire") description+="; расчёт с учётом состояния и частоты";
  if(condition!==1)description+="; состояние × "+condition;
  if(frequency!==1)description+="; регулярность × "+frequency;
  if(percentAddons)description+="; процентные доп. услуги: "+percentAddons+" (+"+(percentAddons*20)+"%)";
- const extras=[oven?("духовка "+oven+" BYN"):"",fridge?("холодильник "+fridge+" BYN"):"",bathroom?("санузел "+bathroom+" BYN"):"",kitchenDeep?("генеральная кухня от "+kitchenDeep+" BYN"):"",furniture?("химчистка мебели "+furniture+" BYN"):""].filter(Boolean);
+ const extras=[oven?("духовка "+oven+" BYN"):"",fridge?("холодильник "+fridge+" BYN"):"",bathroomWalls?("мытьё стен в ванной "+bathroomWalls+" BYN"):"",bathroom?("санузел "+bathroom+" BYN"):"",kitchenDeep?("генеральная кухня от "+kitchenDeep+" BYN"):"",furniture?("химчистка мебели "+furniture+" BYN"):""].filter(Boolean);
  if(extras.length)description+="; "+extras.join(", ");
  $("calcTotal").textContent=area>0?money(Math.round(total)):"Укажите площадь";
  $("calcBreakdown").textContent=description;
  $("calcDisclaimer").textContent=type==="fire"?"Предварительный ориентир. После пожара точная стоимость зависит от сажи, копоти, безопасности объекта и специальных работ.":"Цена предварительная; состав работ и окончательную стоимость подтвердим после уточнения объекта.";
  return {type,area,total:Math.round(total),description,addons:percentAddons};
 }
-["calcType","calcArea","calcCondition","calcFrequency","addonWindows","addonFurniture","addonInside","addonOven","addonFridge","calcBathroom","calcKitchenDeep","chairCount","sofaCount","mattressType"].forEach(id=>{ $(id).addEventListener("input",calculate); $(id).addEventListener("change",calculate); });
+["calcType","calcArea","calcCondition","calcFrequency","addonWindows","addonFurniture","addonInside","addonOven","addonFridge","addonBathroomWalls","calcBathroom","calcKitchenDeep","chairCount","sofaCount","mattressType"].forEach(id=>{ $(id).addEventListener("input",calculate); $(id).addEventListener("change",calculate); });
 function setService(value){const select=$("leadService");const found=[...select.options].find(o=>o.text===value||o.value===value);if(found)select.value=found.value;else if(value==="standard")select.value="Поддерживающая уборка";else if(value==="general")select.value="Генеральная уборка";else if(value==="post")select.value="Уборка после ремонта";else if(value==="kitchen")select.value="Генеральная уборка кухни";else if(value==="fire")select.value="Уборка после пожара";$("leadDetails").value=$("leadDetails").value||"Расчёт: "+$("calcTotal").textContent+"; "+$("calcBreakdown").textContent;}
 calculate();
 document.querySelectorAll("[data-service]").forEach(a=>a.addEventListener("click",()=>setService(a.dataset.service)));
@@ -161,7 +162,7 @@ $("chatClose").addEventListener("click",()=>{chat.classList.remove("open");chatL
 function addBubble(text,who){const b=document.createElement("div");b.className="bubble "+who;b.textContent=text;$("chatBody").appendChild(b);$("chatBody").scrollTop=$("chatBody").scrollHeight;return b;}
 const faq=[
 {re:/услуг|убор|ремонт|пожар|кухн|химчист|ковролин/i,a:"Мы выполняем поддерживающую и генеральную уборку, уборку после ремонта и пожара, генеральную уборку кухни, химчистку мебели, чистку ковролина, комплексный клининг и аутсорсинг персонала."},
-{re:/цен|стоим|сколько|калькулят|рассчит/i,a:"Ориентиры: поддерживающая уборка — 3,75 BYN/м²; генеральная — 5,25 BYN/м² (минимум 125 BYN); после ремонта — 6,5 BYN/м² (минимум 250 BYN); после пожара — от 6,25 BYN/м², минимум 375 BYN. Мытьё духовки и холодильника — по 30 BYN; стандартный санузел — 80 BYN, генеральный — 150 BYN; генеральная уборка кухни — от 150 BYN. Химчистка стула — 100 BYN; цена каждого следующего стула увеличивается на 25% относительно предыдущего (100, 125, 156,25, 195,31 BYN и далее); двухместный диван — 120 BYN; цена каждого следующего звена увеличивается на 25% относительно предыдущего (120, 150, 187,50, 234,38 BYN и далее); матрасы — 130/160/200 BYN. Итог подтверждается после уточнения объекта."},
+{re:/цен|стоим|сколько|калькулят|рассчит/i,a:"Ориентиры: поддерживающая уборка — 3,75 BYN/м²; генеральная — 5,25 BYN/м² (минимум 125 BYN); после ремонта — 6,5 BYN/м² (минимум 250 BYN); после пожара — от 6,25 BYN/м², минимум 375 BYN. Мытьё духовки и холодильника — по 30 BYN; мытьё стен в ванной — 55 BYN; стандартный санузел — 80 BYN, генеральный — 150 BYN; генеральная уборка кухни — от 150 BYN. Химчистка стула — 100 BYN; цена каждого следующего стула увеличивается на 25% относительно предыдущего (100, 125, 156,25, 195,31 BYN и далее); двухместный диван — 120 BYN; цена каждого следующего звена увеличивается на 25% относительно предыдущего (120, 150, 187,50, 234,38 BYN и далее); матрасы — 130/160/200 BYN. Итог подтверждается после уточнения объекта."},
 {re:/юр|компан|бизнес|офис|договор|аутсорс/i,a:"Для юридических лиц подбираем график и состав работ, обслуживаем коммерческие объекты, готовим индивидуальные коммерческие предложения и обсуждаем аутсорсинг персонала. Чтобы запросить предложение, нажмите «Оставить заявку» и выберите соответствующую услугу."},
 {re:/подпис|абонем|регуляр/i,a:"Месячные ориентиры подписок: Базовый — 224 BYN, Комфорт — 388 BYN, Премиум — 714 BYN. Площадь, число визитов и точный состав работ необходимо согласовать до оформления."},
 {re:/контакт|телефон|связ|заяв|заказать|перезвон/i,a:"Вы можете оставить заявку прямо в этом чате через форму ниже. Телефон TrueShine: +375 25 908-51-27."}
