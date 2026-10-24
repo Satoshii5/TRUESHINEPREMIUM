@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS customers (
   sms_consent_at TEXT,
   points INTEGER NOT NULL DEFAULT 0,
   paid_orders INTEGER NOT NULL DEFAULT 0,
+  client_status TEXT NOT NULL DEFAULT 'Новый',
+  discount_percent INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
