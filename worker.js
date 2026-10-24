@@ -103,30 +103,32 @@ export default {
       const safe = v => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 1000);
       try {
         if (url.pathname === "/crm/customers" && request.method === "GET") {
-          const result = await env.DB.prepare("SELECT id,name,phone,email,language,notes,sms_consent,points,paid_orders,created_at FROM customers ORDER BY created_at DESC LIMIT 1000").all();
+          const result = await env.DB.prepare("SELECT id,name,phone,email,language,notes,sms_consent,points,paid_orders,client_status,discount_percent,created_at,updated_at FROM customers ORDER BY created_at DESC LIMIT 1000").all();
           const customers = (result.results || []).map(c => ({...c, sms_consent: !!c.sms_consent, tier: Number(c.paid_orders)>=10?"VIP":Number(c.paid_orders)>=3?"Silver":"Start"}));
           const counts = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM orders) AS ordersCount, (SELECT COUNT(*) FROM sms_outbox WHERE status='queued') AS smsQueued").first();
           return json({ customers, ordersCount: counts?.ordersCount || 0, smsQueued: counts?.smsQueued || 0 }, 200, origin);
         }
         if (url.pathname === "/crm/customers" && request.method === "POST") {
-          const name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes);
+          const name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
+          if (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 100) return json({ error: "Discount must be an integer from 0 to 100" }, 400, origin);
           if (!name || !phone || !/^\+[1-9]\d{6,14}$/.test(phone)) return json({ error: "Name and phone in international format (+countrycode...) are required" }, 400, origin);
           const smsConsent = body.smsConsent === true ? 1 : 0;
           const now = new Date().toISOString(), id = crypto.randomUUID();
-          await env.DB.prepare("INSERT INTO customers (id,name,phone,email,language,notes,sms_consent,sms_consent_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-            .bind(id,name,phone,email||null,language,notes,smsConsent,smsConsent?now:null,now,now).run();
+          await env.DB.prepare("INSERT INTO customers (id,name,phone,email,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+            .bind(id,name,phone,email||null,language,notes,smsConsent,smsConsent?now:null,clientStatus,discountPercent,now,now).run();
           return json({ ok: true, id }, 201, origin);
         }
         if (url.pathname === "/crm/customers/update" && request.method === "POST") {
-          const id = safe(body.id), name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes);
+          const id = safe(body.id), name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
+          if (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 100) return json({ error: "Discount must be an integer from 0 to 100" }, 400, origin);
           if (!id || !name || !phone || !/^\+[1-9]\d{6,14}$/.test(phone)) return json({ error: "Name, customer ID and phone in international format are required" }, 400, origin);
           const existing = await env.DB.prepare("SELECT id,sms_consent,sms_consent_at FROM customers WHERE id=?").bind(id).first();
           if (!existing) return json({ error: "Customer not found" }, 404, origin);
           const smsConsent = body.smsConsent === true ? 1 : 0;
           const now = new Date().toISOString();
           const consentAt = smsConsent ? (existing.sms_consent ? existing.sms_consent_at : now) : null;
-          await env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,updated_at=? WHERE id=?")
-            .bind(name,phone,email||null,language,notes,smsConsent,consentAt,now,id).run();
+          await env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,client_status=?,discount_percent=?,updated_at=? WHERE id=?")
+            .bind(name,phone,email||null,language,notes,smsConsent,consentAt,clientStatus,discountPercent,now,id).run();
           return json({ ok: true, id }, 200, origin);
         }
         if (url.pathname === "/crm/orders" && request.method === "GET") {
