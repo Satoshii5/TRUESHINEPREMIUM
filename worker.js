@@ -109,17 +109,17 @@ export default {
           return json({ customers, ordersCount: counts?.ordersCount || 0, smsQueued: counts?.smsQueued || 0 }, 200, origin);
         }
         if (url.pathname === "/crm/customers" && request.method === "POST") {
-          const name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
+          const name = safe(body.name), phone = safe(body.phone), email = safe(body.email), telegramChatId = safe(body.telegramChatId), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
           if (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 100) return json({ error: "Discount must be an integer from 0 to 100" }, 400, origin);
           if (!name || !phone || !/^\+[1-9]\d{6,14}$/.test(phone)) return json({ error: "Name and phone in international format (+countrycode...) are required" }, 400, origin);
           const smsConsent = body.smsConsent === true ? 1 : 0;
           const now = new Date().toISOString(), id = crypto.randomUUID();
-          await env.DB.prepare("INSERT INTO customers (id,name,phone,email,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-            .bind(id,name,phone,email||null,language,notes,smsConsent,smsConsent?now:null,clientStatus,discountPercent,now,now).run();
+          await env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+            .bind(id,name,phone,email||null,telegramChatId||null,language,notes,smsConsent,smsConsent?now:null,clientStatus,discountPercent,now,now).run();
           return json({ ok: true, id }, 201, origin);
         }
         if (url.pathname === "/crm/customers/update" && request.method === "POST") {
-          const id = safe(body.id), name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
+          const id = safe(body.id), name = safe(body.name), phone = safe(body.phone), email = safe(body.email), telegramChatId = safe(body.telegramChatId), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
           if (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 100) return json({ error: "Discount must be an integer from 0 to 100" }, 400, origin);
           if (!id || !name || !phone || !/^\+[1-9]\d{6,14}$/.test(phone)) return json({ error: "Name, customer ID and phone in international format are required" }, 400, origin);
           const existing = await env.DB.prepare("SELECT id,sms_consent,sms_consent_at FROM customers WHERE id=?").bind(id).first();
@@ -127,24 +127,38 @@ export default {
           const smsConsent = body.smsConsent === true ? 1 : 0;
           const now = new Date().toISOString();
           const consentAt = smsConsent ? (existing.sms_consent ? existing.sms_consent_at : now) : null;
-          await env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,client_status=?,discount_percent=?,updated_at=? WHERE id=?")
-            .bind(name,phone,email||null,language,notes,smsConsent,consentAt,clientStatus,discountPercent,now,id).run();
+          await env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,telegram_chat_id=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,client_status=?,discount_percent=?,updated_at=? WHERE id=?")
+            .bind(name,phone,email||null,telegramChatId||null,language,notes,smsConsent,consentAt,clientStatus,discountPercent,now,id).run();
           return json({ ok: true, id }, 200, origin);
         }
         if (url.pathname === "/crm/orders" && request.method === "GET") {
-          const result = await env.DB.prepare("SELECT o.id,o.customer_id,o.service,o.amount_minor,o.currency,o.status,o.created_at,o.paid_at,c.name,c.phone FROM orders o JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 1000").all();
+          const result = await env.DB.prepare("SELECT o.id,o.customer_id,o.service,o.amount_minor,o.currency,o.status,o.created_at,o.paid_at,o.service_at,o.reminder_sent_at,c.name,c.phone,c.email FROM orders o JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 1000").all();
           return json({ orders: result.results || [] }, 200, origin);
         }
         if (url.pathname === "/crm/orders" && request.method === "POST") {
           const customerId = safe(body.customerId), service = safe(body.service), currency = ["BYN","EUR"].includes(body.currency) ? body.currency : "BYN";
-          const amount = Number(body.amount);
-          if (!customerId || !service || service.length > 200 || !Number.isFinite(amount) || amount < 0 || amount > 100000000) return json({ error: "Customer, service and a valid non-negative amount are required" }, 400, origin);
-          const customer = await env.DB.prepare("SELECT id FROM customers WHERE id=?").bind(customerId).first();
+          const amount = Number(body.amount), rawServiceAt = String(body.serviceAt || "");
+          const serviceAtDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawServiceAt) ? new Date(rawServiceAt + ":00+03:00") : new Date(NaN);
+          if (!customerId || !service || service.length > 200 || !Number.isFinite(amount) || amount < 0 || amount > 100000000 || !Number.isFinite(serviceAtDate.getTime()) || serviceAtDate.getTime() <= Date.now()) return json({ error: "Укажите клиента, услугу, корректную сумму и будущие дату/время начала (время Минска)" }, 400, origin);
+          const customer = await env.DB.prepare("SELECT id,name,email,telegram_chat_id FROM customers WHERE id=?").bind(customerId).first();
           if (!customer) return json({ error: "Customer not found" }, 404, origin);
-          const id = crypto.randomUUID(), now = new Date().toISOString();
-          await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at) VALUES (?,?,?,?,?,'pending',?,NULL)")
-            .bind(id,customerId,service,Math.round(amount*100),currency,now).run();
-          return json({ ok: true, id, message: "Order created" }, 201, origin);
+          const id = crypto.randomUUID(), now = new Date().toISOString(), serviceAt = serviceAtDate.toISOString(), amountMinor = Math.round(amount*100);
+          await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) VALUES (?,?,?,?,?,'pending',?,NULL,?,NULL)").bind(id,customerId,service,amountMinor,currency,now,serviceAt).run();
+          const dateText = new Date(serviceAt).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" });
+          const amountText = (amountMinor/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2});
+          const notice = await notifyCustomer(env, customer, "Заказ TrueShine подтверждён", "Здравствуйте, " + customer.name + "! Ваш заказ TrueShine создан. Услуга: " + service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + currency + ". Статус оплаты: ожидает оплаты.");
+          return json({ ok: true, id, notifications: notice, message: "Order created" }, 201, origin);
+        }
+        if (url.pathname === "/crm/orders/paid" && request.method === "POST") {
+          const orderId = safe(body.orderId);
+          if (!orderId) return json({ error: "Order ID is required" }, 400, origin);
+          const order = await env.DB.prepare("SELECT o.id,o.status,o.service,o.service_at,o.amount_minor,o.currency,c.id AS customer_id,c.name,c.email,c.telegram_chat_id FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=?").bind(orderId).first();
+          if (!order) return json({ error: "Order not found" }, 404, origin);
+          if (order.status !== "paid") { const now = new Date().toISOString(); await env.DB.prepare("UPDATE orders SET status='paid',paid_at=? WHERE id=?").bind(now,orderId).run(); await env.DB.prepare("UPDATE customers SET paid_orders=paid_orders+1,updated_at=? WHERE id=?").bind(now,order.customer_id).run(); }
+          const amountText = (Number(order.amount_minor||0)/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2});
+          const dateText = order.service_at ? new Date(order.service_at).toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}) : "не указаны";
+          const notice = await notifyCustomer(env, order, "Оплата заказа TrueShine получена", "Здравствуйте, " + order.name + "! Оплата вашего заказа TrueShine получена. Услуга: " + order.service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + order.currency + ". Спасибо за выбор TrueShine!");
+          return json({ ok: true, notifications: notice, message: "Payment marked as paid" }, 200, origin);
         }
         if (url.pathname === "/crm/sms" && request.method === "POST") {
           const customerId=safe(body.customerId), message=safe(body.message), category=body.category==="marketing"?"marketing":"service";
