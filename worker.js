@@ -100,7 +100,7 @@ export default {
         return json({ error: "Unauthorized: CRM token required" }, 401, origin);
       }
       if (!env.DB) return json({ error: "CRM database is not configured. Add D1 binding named DB." }, 503, origin);
-      const safe = v => String(v || "").replace(/[\\u0000-\\u001f\\u007f]/g, " ").trim().slice(0, 1000);
+      const safe = v => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 1000);
       try {
         if (url.pathname === "/crm/customers" && request.method === "GET") {
           const result = await env.DB.prepare("SELECT id,name,phone,email,language,notes,sms_consent,points,paid_orders,created_at FROM customers ORDER BY created_at DESC LIMIT 1000").all();
@@ -110,7 +110,7 @@ export default {
         }
         if (url.pathname === "/crm/customers" && request.method === "POST") {
           const name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes);
-          if (!name || !phone || !/^\\+[1-9]\\d{6,14}$/.test(phone)) return json({ error: "Name and phone in international format (+countrycode...) are required" }, 400, origin);
+          if (!name || !phone || !/^\+[1-9]\d{6,14}$/.test(phone)) return json({ error: "Name and phone in international format (+countrycode...) are required" }, 400, origin);
           const smsConsent = body.smsConsent === true ? 1 : 0;
           const now = new Date().toISOString(), id = crypto.randomUUID();
           await env.DB.prepare("INSERT INTO customers (id,name,phone,email,language,notes,sms_consent,sms_consent_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
