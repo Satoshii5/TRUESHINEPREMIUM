@@ -118,7 +118,8 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(origin) });
     const url = new URL(request.url);
     const crmRead = request.method === "GET" && url.pathname.startsWith("/crm/");
-    if (request.method !== "POST" && !crmRead) return json({ error: "Method not allowed" }, 405, origin);
+    const accountRead = request.method === "GET" && url.pathname === "/account/me";
+    if (request.method !== "POST" && !crmRead && !accountRead) return json({ error: "Method not allowed" }, 405, origin);
     if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ error: "Origin not allowed" }, 403, origin);
     let body = {};
     if (request.method === "POST") { try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400, origin); } }
@@ -175,6 +176,79 @@ export default {
       } catch (error) {
         return json({ error: "Telegram delivery is not configured or failed" }, 503, origin);
       }
+    }
+    if (url.pathname.startsWith("/account/")) {
+      if (!env.DB) return json({ error: "Сервис аккаунтов временно недоступен" }, 503, origin);
+      const clean = v => String(v || "").replace(/[\\u0000-\\u001f\\u007f]/g, " ").trim().slice(0, 200);
+      const ensureTables = async () => {
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
+      };
+      const hashText = async value => {
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+        return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+      };
+      const passwordHash = async (password, salt) => {
+        const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+        const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 150000, hash: "SHA-256" }, key, 256);
+        return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, "0")).join("");
+      };
+      const issueSession = async accountId => {
+        const raw = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, "0")).join("");
+        const now = new Date(), expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        await env.DB.prepare("INSERT INTO customer_sessions (token_hash,account_id,expires_at,created_at) VALUES (?,?,?,?)").bind(await hashText(raw), accountId, expires, now.toISOString()).run();
+        return raw;
+      };
+      try {
+        await ensureTables();
+        if (url.pathname === "/account/register" && request.method === "POST") {
+          const name = clean(body.name), email = clean(body.email).toLowerCase(), phone = clean(body.phone), password = String(body.password || "");
+          const phoneNorm = normalizePhone(phone);
+          if (name.length < 2 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || !/^\\+[1-9]\\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128) return json({ error: "Укажите имя, корректный email, телефон в международном формате и пароль от 10 символов." }, 400, origin);
+          const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE email=? COLLATE NOCASE OR phone_norm=?").bind(email, phoneNorm).first();
+          if (existingAccount) return json({ error: "Аккаунт с таким email или телефоном уже существует. Войдите в аккаунт." }, 409, origin);
+          const all = await env.DB.prepare("SELECT id,phone FROM customers WHERE phone IS NOT NULL LIMIT 5000").all();
+          let customer = (all.results || []).find(c => normalizePhone(c.phone) === phoneNorm);
+          const now = new Date().toISOString();
+          if (!customer) {
+            const id = crypto.randomUUID();
+            await env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)")
+              .bind(id, name, phone, email, now, now).run();
+            customer = { id };
+          } else {
+            await env.DB.prepare("UPDATE customers SET email=COALESCE(NULLIF(email,''),?),updated_at=? WHERE id=?").bind(email, now, customer.id).run();
+          }
+          const accountId = crypto.randomUUID(), salt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
+          await env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)")
+            .bind(accountId, customer.id, email, phoneNorm, salt, await passwordHash(password, salt), now).run();
+          const session = await issueSession(accountId);
+          return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email, phone } }, 201, origin);
+        }
+        if (url.pathname === "/account/login" && request.method === "POST") {
+          const email = clean(body.email).toLowerCase(), password = String(body.password || "");
+          const account = await env.DB.prepare("SELECT a.id,a.customer_id,a.email,a.password_salt,a.password_hash,c.name,c.phone FROM customer_accounts a JOIN customers c ON c.id=a.customer_id WHERE a.email=? COLLATE NOCASE").bind(email).first();
+          if (!account || !password || await passwordHash(password, account.password_salt) !== account.password_hash) return json({ error: "Неверный email или пароль." }, 401, origin);
+          const session = await issueSession(account.id);
+          return json({ ok: true, token: session, customer: { name: account.name, email: account.email, phone: account.phone } }, 200, origin);
+        }
+        if (url.pathname === "/account/me" && request.method === "GET") {
+          const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+          if (!raw) return json({ error: "Войдите в аккаунт." }, 401, origin);
+          const account = await env.DB.prepare("SELECT a.id,a.email,c.id AS customer_id,c.name,c.phone FROM customer_sessions s JOIN customer_accounts a ON a.id=s.account_id JOIN customers c ON c.id=a.customer_id WHERE s.token_hash=? AND s.expires_at>?").bind(await hashText(raw), new Date().toISOString()).first();
+          if (!account) return json({ error: "Сессия истекла. Войдите снова." }, 401, origin);
+          const orders = await env.DB.prepare("SELECT id,service,amount_minor,currency,status,created_at,service_at,paid_at FROM orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 100").bind(account.customer_id).all();
+          return json({ ok: true, customer: { name: account.name, email: account.email, phone: account.phone }, orders: orders.results || [] }, 200, origin);
+        }
+        if (url.pathname === "/account/logout" && request.method === "POST") {
+          const raw = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+          if (raw) await env.DB.prepare("DELETE FROM customer_sessions WHERE token_hash=?").bind(await hashText(raw)).run();
+          return json({ ok: true }, 200, origin);
+        }
+      } catch (error) {
+        if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({ error: "Аккаунт с таким email или телефоном уже зарегистрирован." }, 409, origin);
+        return json({ error: "Не удалось обработать аккаунт. Попробуйте позже." }, 500, origin);
+      }
+      return json({ error: "Not found" }, 404, origin);
     }
     if (url.pathname.startsWith("/crm/")) {
       if (!env.CRM_ADMIN_TOKEN || request.headers.get("Authorization") !== "Bearer " + env.CRM_ADMIN_TOKEN) {
