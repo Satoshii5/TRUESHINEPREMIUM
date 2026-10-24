@@ -1,4 +1,4 @@
-name: Deploy TrueShine Premium to GitHub Pages
+name: Deploy TrueShine website via GitHub Pages
 on:
   push:
     branches: ["main"]
