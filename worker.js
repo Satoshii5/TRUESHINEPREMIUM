@@ -117,9 +117,32 @@ export default {
             .bind(id,name,phone,email||null,language,notes,smsConsent,smsConsent?now:null,now,now).run();
           return json({ ok: true, id }, 201, origin);
         }
+        if (url.pathname === "/crm/customers/update" && request.method === "POST") {
+          const id = safe(body.id), name = safe(body.name), phone = safe(body.phone), email = safe(body.email), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes);
+          if (!id || !name || !phone || !/^\+[1-9]\d{6,14}$/.test(phone)) return json({ error: "Name, customer ID and phone in international format are required" }, 400, origin);
+          const existing = await env.DB.prepare("SELECT id,sms_consent,sms_consent_at FROM customers WHERE id=?").bind(id).first();
+          if (!existing) return json({ error: "Customer not found" }, 404, origin);
+          const smsConsent = body.smsConsent === true ? 1 : 0;
+          const now = new Date().toISOString();
+          const consentAt = smsConsent ? (existing.sms_consent ? existing.sms_consent_at : now) : null;
+          await env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,updated_at=? WHERE id=?")
+            .bind(name,phone,email||null,language,notes,smsConsent,consentAt,now,id).run();
+          return json({ ok: true, id }, 200, origin);
+        }
         if (url.pathname === "/crm/orders" && request.method === "GET") {
-          const result = await env.DB.prepare("SELECT o.id,o.service,o.amount_minor,o.currency,o.status,o.created_at,o.paid_at,c.name,c.phone FROM orders o JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 1000").all();
+          const result = await env.DB.prepare("SELECT o.id,o.customer_id,o.service,o.amount_minor,o.currency,o.status,o.created_at,o.paid_at,c.name,c.phone FROM orders o JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 1000").all();
           return json({ orders: result.results || [] }, 200, origin);
+        }
+        if (url.pathname === "/crm/orders" && request.method === "POST") {
+          const customerId = safe(body.customerId), service = safe(body.service), currency = ["BYN","EUR"].includes(body.currency) ? body.currency : "BYN";
+          const amount = Number(body.amount);
+          if (!customerId || !service || service.length > 200 || !Number.isFinite(amount) || amount < 0 || amount > 100000000) return json({ error: "Customer, service and a valid non-negative amount are required" }, 400, origin);
+          const customer = await env.DB.prepare("SELECT id FROM customers WHERE id=?").bind(customerId).first();
+          if (!customer) return json({ error: "Customer not found" }, 404, origin);
+          const id = crypto.randomUUID(), now = new Date().toISOString();
+          await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at) VALUES (?,?,?,?,?,'pending',?,NULL)")
+            .bind(id,customerId,service,Math.round(amount*100),currency,now).run();
+          return json({ ok: true, id, message: "Order created" }, 201, origin);
         }
         if (url.pathname === "/crm/sms" && request.method === "POST") {
           const customerId=safe(body.customerId), message=safe(body.message), category=body.category==="marketing"?"marketing":"service";
