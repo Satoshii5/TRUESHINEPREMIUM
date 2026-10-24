@@ -257,7 +257,7 @@ export default {
           const rule=rules[key]; if(!rule&&!["upholstery","carpet","business","other"].includes(key)) return json({error:"Выберите услугу из списка."},400,origin);
           if(rule&&rule[1]>0&&(!Number.isFinite(area)||area<1||area>10000)) return json({error:"Укажите площадь от 1 до 10000 м²."},400,origin);
           const base=rule?(rule[1]>0?Math.max(rule[2],rule[1]*area):rule[2]):0;
-          const pct=Math.max(0,Math.min(50,Number(account.discount_percent||0))),afterDiscount=Math.round(base*(100-pct))/100;
+          const pct=Math.max(0,Math.min(100,Number(account.discount_percent||0))),afterDiscount=Math.round(base*(100-pct))/100;
           let loyalty=await env.DB.prepare("SELECT points FROM customer_loyalty WHERE customer_id=?").bind(account.customer_id).first();
           if(!loyalty){const card="TS-"+Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();await env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(account.customer_id,card,new Date().toISOString()).run();loyalty=await env.DB.prepare("SELECT points FROM customer_loyalty WHERE customer_id=?").bind(account.customer_id).first();}
           const used=body.usePoints===true?Math.min(Number(loyalty.points||0),Math.floor(afterDiscount*.2)):0,final=Math.max(0,Math.round((afterDiscount-used)*100)/100);
