@@ -122,7 +122,7 @@ async function submitLead(lead,statusId){
  showStatus(statusId,"Отправляем заявку напрямую в Telegram…");
  try{
   if(!API_ENDPOINT)throw new Error("Не настроен сервер отправки заявок.");
-  const res=await fetch(API_ENDPOINT.replace(/\\/$/,"")+"/lead",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(lead)});
+  const res=await fetch(API_ENDPOINT.replace(/\/$/,"")+"/lead",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(lead)});
   const data=await res.json().catch(()=>({}));
   if(!res.ok||!data.ok)throw new Error(data.error||("Ошибка сервера: "+res.status));
   showStatus(statusId,"Заявка успешно отправлена в Telegram. Спасибо! Мы свяжемся с вами.");
