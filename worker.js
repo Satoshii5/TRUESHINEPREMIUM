@@ -385,6 +385,21 @@ export default {
           } catch {}
           return json({ ok: true, id: orderId, status, notifications: { ...notifications, group } }, 200, origin);
         }
+        if (url.pathname === "/crm/orders/price" && request.method === "POST") {
+          const orderId=safe(body.orderId), baseAmount=Number(body.amount);
+          if(!orderId||!Number.isFinite(baseAmount)||baseAmount<=0||baseAmount>100000000) return json({error:"Укажите заказ и подтверждённую цену больше нуля."},400,origin);
+          const order=await env.DB.prepare("SELECT o.id,o.status,o.amount_minor,o.currency,o.service,o.service_at,c.id AS customer_id,c.name,c.phone,c.email,c.telegram_chat_id,c.discount_percent FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=?").bind(orderId).first();
+          if(!order) return json({error:"Заказ не найден."},404,origin);
+          if(Number(order.amount_minor||0)!==0) return json({error:"Цена уже установлена. Для изменения обратитесь к администратору."},409,origin);
+          if(["paid","cancelled"].includes(order.status)) return json({error:"Нельзя менять цену оплаченного или отменённого заказа."},409,origin);
+          const pct=Math.max(0,Math.min(100,Number(order.discount_percent||0))),finalAmount=Math.round(baseAmount*(100-pct))/100,minor=Math.round(finalAmount*100);
+          await env.DB.prepare("UPDATE orders SET amount_minor=?,service=replace(service,char(10)||'Стоимость уточнит менеджер.',char(10)||'Стоимость подтверждена менеджером.') WHERE id=?").bind(minor,orderId).run();
+          const amountText=(minor/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}),dateText=order.service_at?new Date(order.service_at).toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}):"не указана";
+          const msg="Менеджер TrueShine подтвердил стоимость вашей заявки. Заказ: "+order.id+". Итоговая стоимость с учётом персональной скидки "+pct+"%: "+amountText+" "+order.currency+". Дата: "+dateText+" (Минск).";
+          const notice=await notifyCustomer(env,order,"Подтверждена стоимость заказа TrueShine",msg);let group="failed";
+          try{await sendTelegram(env,"💰 ЦЕНА ЗАКАЗА ПОДТВЕРЖДЕНА\nЗаказ: "+order.id+"\nКлиент: "+order.name+"\nУслуга: "+order.service+"\nБазовая цена: "+baseAmount.toFixed(2)+" "+order.currency+"\nСкидка: "+pct+"%\nИтого: "+amountText+" "+order.currency+"\nДата: "+dateText+" (Минск)");group="sent";}catch{}
+          return json({ok:true,amount:finalAmount,discountPercent:pct,notifications:{...notice,group}},200,origin);
+        }
         if (url.pathname === "/crm/orders/paid" && request.method === "POST") {
           const orderId = safe(body.orderId);
           if (!orderId) return json({ error: "Order ID is required" }, 400, origin);
