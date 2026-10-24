@@ -241,6 +241,17 @@ export default {
           const notice = await notifyCustomer(env, customer, "Заказ TrueShine подтверждён", "Здравствуйте, " + customer.name + "! Ваш заказ TrueShine создан. Услуга: " + service + ". Дата и время: " + dateText + " (время Минска). Сумма: " + amountText + " " + currency + ". Статус оплаты: ожидает оплаты.");
           return json({ ok: true, id, notifications: notice, message: "Order created" }, 201, origin);
         }
+        if (url.pathname === "/crm/orders/status" && request.method === "POST") {
+          const orderId = safe(body.orderId), status = String(body.status || "");
+          const allowedStatuses = ["pending","confirmed","in_progress","completed","cancelled"];
+          if (!orderId || !allowedStatuses.includes(status)) return json({ error: "Укажите заказ и допустимый статус" }, 400, origin);
+          const order = await env.DB.prepare("SELECT id,status FROM orders WHERE id=?").bind(orderId).first();
+          if (!order) return json({ error: "Заказ не найден" }, 404, origin);
+          if (order.status === "paid") return json({ error: "Оплаченный заказ нельзя изменить. Для исправления обратитесь к администратору." }, 409, origin);
+          if (order.status === "cancelled" && status !== "cancelled") return json({ error: "Отменённый заказ нельзя возобновить через эту кнопку." }, 409, origin);
+          await env.DB.prepare("UPDATE orders SET status=? WHERE id=?").bind(status, orderId).run();
+          return json({ ok: true, id: orderId, status }, 200, origin);
+        }
         if (url.pathname === "/crm/orders/paid" && request.method === "POST") {
           const orderId = safe(body.orderId);
           if (!orderId) return json({ error: "Order ID is required" }, 400, origin);
