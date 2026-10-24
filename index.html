@@ -87,7 +87,8 @@ function calculate(){
  const oven=$("addonOven").checked?30:0, fridge=$("addonFridge").checked?30:0;
  const bathroom=Number($("calcBathroom").value||0), kitchenDeep=Number($("calcKitchenDeep").value||0);
  const chairs=Math.max(0,Math.floor(Number($("chairCount").value||0))), sofas=Math.max(0,Math.floor(Number($("sofaCount").value||0))), mattress=Number($("mattressType").value||0);
- const furniture=(chairs?100+(chairs-1)*25:0)+(sofas?120+(sofas-1)*30:0)+mattress;
+ const progressiveTotal=(count,base)=>{let sum=0,price=base;for(let i=0;i<count;i++){sum+=price;price*=1.25;}return sum;};
+ const furniture=progressiveTotal(chairs,100)+progressiveTotal(sofas,120)+mattress;
  let total=0, base=0, description="";
  if(type==="kitchen"){base=area>0?Math.max(150,150+(area-8)*2.5):0;description="Генеральная уборка кухни: от 150 BYN";}
  else if(type==="fire"){base=area>0?Math.max(300,area*5):0;description="Ориентир 5 BYN/м², минимум 300 BYN";}
