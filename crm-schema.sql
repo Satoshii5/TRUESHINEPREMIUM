@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS customers (
   name TEXT NOT NULL,
   phone TEXT NOT NULL UNIQUE,
   email TEXT,
+  telegram_chat_id TEXT,
   language TEXT NOT NULL DEFAULT 'ru',
   notes TEXT NOT NULL DEFAULT '',
   sms_consent INTEGER NOT NULL DEFAULT 0,
@@ -23,7 +24,9 @@ CREATE TABLE IF NOT EXISTS orders (
   currency TEXT NOT NULL DEFAULT 'BYN',
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL,
-  paid_at TEXT
+  paid_at TEXT,
+  service_at TEXT,
+  reminder_sent_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
