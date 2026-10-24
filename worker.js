@@ -13,8 +13,8 @@ function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allowed,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Vary": "Origin",
     "Content-Type": "application/json; charset=utf-8"
   };
@@ -39,11 +39,12 @@ export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(origin) });
-    if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, origin);
-    if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ error: "Origin not allowed" }, 403, origin);
     const url = new URL(request.url);
-    let body;
-    try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400, origin); }
+    const crmRead = request.method === "GET" && url.pathname.startsWith("/crm/");
+    if (request.method !== "POST" && !crmRead) return json({ error: "Method not allowed" }, 405, origin);
+    if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ error: "Origin not allowed" }, 403, origin);
+    let body = {};
+    if (request.method === "POST") { try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400, origin); } }
     if (url.pathname.endsWith("/chat")) {
       const message = String(body.message || "").trim().slice(0, 2000);
       if (!message) return json({ error: "Message is required" }, 400, origin);
