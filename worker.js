@@ -215,6 +215,30 @@ export default {
       if (!env.DB) return json({ error: "Сервис аккаунтов временно недоступен" }, 503, origin);
       const clean = v => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200);
       const ensureTables = async () => {
+        // Older CRM installations may predate some customer-profile columns.
+        // Migrate additively: preserve existing clients, orders and identifiers.
+        const customerTable = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='customers'").first();
+        if (!customerTable) {
+          await env.DB.prepare("CREATE TABLE customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL UNIQUE, email TEXT, telegram_chat_id TEXT, language TEXT NOT NULL DEFAULT 'ru', notes TEXT NOT NULL DEFAULT '', sms_consent INTEGER NOT NULL DEFAULT 0, sms_consent_at TEXT, points INTEGER NOT NULL DEFAULT 0, paid_orders INTEGER NOT NULL DEFAULT 0, client_status TEXT NOT NULL DEFAULT 'Новый', discount_percent INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)").run();
+        } else {
+          const info = await env.DB.prepare("PRAGMA table_info(customers)").all();
+          const columns = new Set((info.results || []).map(column => column.name));
+          const migrations = [
+            ["email", "TEXT"],
+            ["telegram_chat_id", "TEXT"],
+            ["language", "TEXT NOT NULL DEFAULT 'ru'"],
+            ["notes", "TEXT NOT NULL DEFAULT ''"],
+            ["sms_consent", "INTEGER NOT NULL DEFAULT 0"],
+            ["sms_consent_at", "TEXT"],
+            ["client_status", "TEXT NOT NULL DEFAULT 'Новый'"],
+            ["discount_percent", "INTEGER NOT NULL DEFAULT 0"],
+            ["created_at", "TEXT NOT NULL DEFAULT ''"],
+            ["updated_at", "TEXT NOT NULL DEFAULT ''"]
+          ];
+          for (const [column, definition] of migrations) {
+            if (!columns.has(column)) await env.DB.prepare("ALTER TABLE customers ADD COLUMN " + column + " " + definition).run();
+          }
+        }
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_loyalty (customer_id TEXT PRIMARY KEY, card_number TEXT NOT NULL UNIQUE, points INTEGER NOT NULL DEFAULT 0, lifetime_points INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
