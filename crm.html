@@ -3,6 +3,46 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{--g:#102f27;--g2:#194438;--gold:#c4a873;--bg:#f4f3ed;--paper:#fffefa;--ink:#20352b;--muted:#718076;--line:#e2e4db}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px 'DM Sans',sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.top{background:var(--g);color:white;padding:18px max(20px,calc((100% - 1200px)/2));display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{font:22px 'Playfair Display',serif;letter-spacing:.08em}.brand small{display:block;font:9px 'DM Sans',sans-serif;letter-spacing:.2em;color:var(--gold);margin-top:4px}.wrap{max-width:1200px;margin:auto;padding:26px 18px}.login{max-width:460px;margin:9vh auto;background:var(--paper);padding:30px;border:1px solid var(--line)}h1,h2,h3{font-family:'Playfair Display',serif;font-weight:400}h1{font-size:36px;margin:8px 0}h2{font-size:28px;margin:0 0 18px}.muted{color:var(--muted);font-size:12px;line-height:1.7}.field{display:grid;gap:7px;margin:13px 0}.field label{font-size:11px;color:var(--muted)}input,select,textarea{width:100%;padding:12px;border:1px solid var(--line);background:white;border-radius:5px;color:var(--ink)}.btn{border:0;border-radius:4px;background:var(--g);color:white;padding:12px 16px;font-weight:600}.btn.gold{background:var(--gold);color:var(--g)}.btn.ghost{background:transparent;color:var(--g);border:1px solid var(--line)}.btn:disabled{opacity:.5;cursor:wait}.hidden{display:none!important}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}.stat,.panel{background:var(--paper);border:1px solid var(--line);padding:20px}.stat span{display:block;color:var(--muted);font-size:11px}.stat strong{display:block;font:30px 'Playfair Display',serif;color:var(--g);margin-top:8px}.grid{display:grid;grid-template-columns:1fr 1.5fr;gap:16px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}.tab{border:1px solid var(--line);background:var(--paper);padding:10px 14px;color:var(--g)}.tab.active{background:var(--g);color:white}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:620px}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted);font-weight:600}td strong{display:block}.customer-row{cursor:pointer}.customer-row:hover{background:#f1f3ec}.modal-backdrop{position:fixed;inset:0;background:#102f2788;display:flex;align-items:center;justify-content:center;padding:18px;z-index:10}.modal-card{background:var(--paper);width:min(100%,560px);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--line);box-shadow:0 20px 70px #0002}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.detail-item{padding:12px;background:#f4f3ed;overflow-wrap:anywhere}.detail-item span{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}.detail-item strong{font-size:13px;font-weight:600}@media(max-width:520px){.detail-grid{grid-template-columns:1fr}}.pill{display:inline-block;border-radius:100px;background:#e9eee7;padding:4px 8px;font-size:10px;color:var(--g)}.message{padding:12px;background:#e9eee7;color:var(--g);margin:12px 0;font-size:12px}.error{background:#f8e8e4;color:#843e31}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>*{flex:1}.row .btn{flex:0 0 auto}.sectionhead{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin:10px 0 18px}.consent{display:flex;gap:9px;align-items:flex-start;font-size:11px;color:var(--muted)}.consent input{width:auto;margin-top:3px}.points{font-weight:700;color:#9b7a3e}.small{font-size:11px}@media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.top{padding:16px 18px}.stat{padding:14px}.stat strong{font-size:25px}.wrap{padding:18px 12px}.panel{padding:16px}} 
+
+/* Responsive premium CRM controls and clearer focus states */
+body{background:radial-gradient(ellipse at top right,#e6e9de 0,transparent 42%),var(--bg);line-height:1.55}
+.top{position:sticky;top:0;z-index:20;box-shadow:0 8px 28px #102f2714}
+.login,.stat,.panel,.modal-card{border-radius:16px;box-shadow:0 14px 38px #102f2709}
+.login{padding:clamp(22px,4vw,34px)}
+.panel,.stat{transition:box-shadow .22s ease,border-color .22s ease}
+.panel:hover,.stat:hover{border-color:#d3c39d;box-shadow:0 18px 42px #102f2710}
+.btn{border-radius:999px;min-height:44px;padding:12px 19px;transition:transform .18s ease,box-shadow .18s ease,background .18s ease;box-shadow:0 5px 14px #102f2710}
+.btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 24px #102f2720}
+.btn:active:not(:disabled){transform:translateY(0) scale(.99)}
+.tab{border-radius:999px;padding:11px 16px;transition:background .18s ease,color .18s ease,border-color .18s ease}
+input:focus,select:focus,textarea:focus{outline:3px solid #c4a87355;outline-offset:1px;border-color:var(--gold)}
+button:focus-visible,.customer-row:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.table-wrap{border:1px solid var(--line);border-radius:12px;background:var(--paper)}
+.table-wrap table{border:0}
+th{position:sticky;top:0;background:var(--paper);z-index:1}
+.modal-backdrop{overflow-y:auto;align-items:flex-start}
+.modal-card{margin:auto}
+.message{border-radius:10px}
+.pill{font-weight:700}
+@media(max-width:760px){
+ .sectionhead{align-items:stretch}
+ .sectionhead>.btn{width:100%}
+ .row{align-items:stretch}
+ .row .btn{width:100%}
+ .modal-backdrop{padding:10px;align-items:flex-start}
+ .modal-card{padding:18px;max-height:calc(100dvh - 20px);width:100%}
+}
+@media(max-width:520px){
+ .login{margin:5vh 12px;padding:22px}
+ h1{font-size:30px}
+ h2{font-size:24px}
+ .stats{gap:8px}
+ .stat strong{font-size:22px}
+ .tabs{gap:6px}
+ .tab{padding:9px 12px;font-size:12px}
+ th,td{padding:10px 8px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;scroll-behavior:auto!important}}
 </style></head><body>
 <header class="top"><div class="brand">TRUE SHINE<small>PREMIUM · CLIENT RELATIONSHIP</small></div><button class="btn ghost hidden" id="logout">Выйти</button></header>
 <section id="login" class="login"><p class="muted">ЗАЩИЩЁННАЯ ПАНЕЛЬ</p><h1>CRM клиентов</h1><p class="muted">Введите секретный CRM-токен, сохранённый в Cloudflare Worker. Токен не хранится в исходном коде сайта.</p><form id="loginForm"><div class="field"><label for="token">CRM-токен</label><input id="token" type="password" autocomplete="current-password" required></div><button class="btn" type="submit">Войти в систему</button><div id="loginMsg" class="muted"></div></form></section>
