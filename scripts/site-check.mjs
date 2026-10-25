@@ -33,7 +33,8 @@ if (!worker.includes('request.headers.get("Authorization") !== "Bearer " + env.C
   fail.push("CRM admin token guard was not found");
 }
 if (!worker.includes("s.expires_at>?")) fail.push("Session expiry check was not found");
-if (!worker.includes("самостоятельная привязка существующей карточки отключена")) {
+if (!worker.includes("Phone is the primary customer identity. Reuse an existing CRM row to preserve order history.") ||
+    !worker.includes("if (linked) return json({ error: \"Для этого телефона уже есть личный кабинет.")) {
   fail.push("Existing customer record-linking protection was not found");
 }
 if (!worker.includes("async function checkRateLimit")) fail.push("API rate limiting helper was not found");
@@ -42,9 +43,18 @@ if (!worker.includes('"lead", 8, 10 * 60 * 1000')) fail.push("Lead form rate lim
 if (!worker.includes('"register" : "login", url.pathname === "/account/register" ? 5 : 10, 15 * 60 * 1000')) fail.push("Registration/login brute-force throttling was not found");
 if (!worker.includes("iterations: 150000, hash: \"SHA-256\"")) fail.push("PBKDF2 password hashing strength check was not found");
 if (!worker.includes("crypto.getRandomValues(new Uint8Array(32))")) fail.push("High-entropy session token generation was not found");
-if (!worker.includes("await hashText(raw), expires")) fail.push("Session token hashing before storage was not found");
+if (!worker.includes('VALUES (?,?,?,?)").bind(await hashText(raw), accountId, expires, now.toISOString())')) fail.push("Session token hashing before storage was not found");
 if (!worker.includes("password.length < 10 || password.length > 128")) fail.push("Registration password length validation was not found");
-if (!worker.includes("Самостоятельная привязка существующей карточки отключена") && !worker.includes("самостоятельная привязка существующей карточки отключена")) fail.push("Existing customer account takeover protection was not found");
+if (!worker.includes("if (linked) return json({ error: \"Для этого телефона уже есть личный кабинет.") ||
+    !worker.includes("const existingAccount = await env.DB.prepare(\"SELECT id FROM customer_accounts WHERE phone_norm=? OR (?<>'' AND email=? COLLATE NOCASE)\")")) {
+  fail.push("Existing customer account takeover protection was not found");
+}
+if (!html.includes('id="accountRegister"') || /<form id="accountRegister"[\\s\\S]*?<label[^>]*>\\s*Email\\s*<input[^>]*required/i.test(html)) {
+  fail.push("Customer registration must not require email");
+}
+if (!worker.includes("Email необязателен.") || !worker.includes('const accountEmail = email || ("phone-" + phoneNorm.replace(/\\D/g, "") + "@noemail.trueshine.invalid")')) {
+  fail.push("Phone-only registration backend fallback was not found");
+}
 if (!worker.includes("const orderBatch = await env.DB.batch")) fail.push("Atomic order and loyalty redemption batch was not found");
 if (!worker.includes("UPDATE customer_accounts SET email=CASE WHEN ?<>'' THEN ? ELSE email END,phone_norm=? WHERE customer_id=?")) fail.push("CRM-to-account contact synchronization was not found");
 if (!worker.includes('"X-Content-Type-Options": "nosniff"')) fail.push("Security response headers were not found");
