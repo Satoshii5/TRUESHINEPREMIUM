@@ -36,7 +36,7 @@ if (!worker.includes("самостоятельная привязка сущес
 if (!crm.includes("TrueShine CRM")) fail.push("CRM HTML title is missing");
 
 const inlineScripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
-  .filter((m) => !/\bsrc=["']/.test(m[0]));
+  .filter((m) => !/\bsrc=["']/.test(m[0]) && !m[0].toLowerCase().includes('type="application/ld+json') && !m[0].toLowerCase().includes("type='application/ld+json"));
 for (let i = 0; i < inlineScripts.length; i++) {
   try { new Function(inlineScripts[i][1]); }
   catch (error) { fail.push("Inline JavaScript syntax error in block " + (i + 1) + ": " + error.message); }
