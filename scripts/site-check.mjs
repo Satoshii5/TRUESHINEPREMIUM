@@ -5,7 +5,7 @@ const html = readFileSync("index.html", "utf8");
 const worker = readFileSync("worker.js", "utf8");
 const crm = readFileSync("crm.html", "utf8");
 
-const ids = [...html.matchAll(/\\bid=["']([^"']+)["']/g)].map((m) => m[1]);
+const ids = [...html.matchAll(/\bid=["']([^"']+)["']/g)].map((m) => m[1]);
 const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
 if (duplicates.length) fail.push("Duplicate HTML IDs: " + [...new Set(duplicates)].join(", "));
 
@@ -35,8 +35,8 @@ if (!worker.includes("самостоятельная привязка сущес
 }
 if (!crm.includes("TrueShine CRM")) fail.push("CRM HTML title is missing");
 
-const inlineScripts = [...html.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)]
-  .filter((m) => !/\\bsrc=["']/.test(m[0]));
+const inlineScripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
+  .filter((m) => !/\bsrc=["']/.test(m[0]));
 for (let i = 0; i < inlineScripts.length; i++) {
   try { new Function(inlineScripts[i][1]); }
   catch (error) { fail.push("Inline JavaScript syntax error in block " + (i + 1) + ": " + error.message); }
