@@ -41,3 +41,14 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Smoke-test published website
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 5 --retry-delay 5 "$SITE_URL" -o /tmp/published-site.html
+          grep -qi "TrueShine" /tmp/published-site.html
+          grep -q 'id="included"' /tmp/published-site.html
+          grep -q 'id="calculator"' /tmp/published-site.html
+          grep -q 'id="leadForm"' /tmp/published-site.html
+          echo "Published site smoke test passed: title, service details, calculator and lead form are present."
