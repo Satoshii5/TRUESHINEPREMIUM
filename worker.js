@@ -303,9 +303,17 @@ export default {
           const title=rule?rule[0]:({upholstery:"Химчистка мебели",carpet:"Чистка ковролина",business:"Комплексный клининг / обслуживание бизнеса",other:"Другая услуга"}[key]);
           const service=title+(rule&&rule[1]>0?" — "+area+" м²":"")+"\nАдрес: "+address+(comment?"\nКомментарий: "+comment:"")+(base?"\nПредварительная цена: "+base.toFixed(2)+" BYN; персональная скидка "+pct+"%; списано баллов "+used+". Цена уточняется менеджером.":"\nСтоимость уточнит менеджер.");
           const id=crypto.randomUUID(),now=new Date().toISOString(),serviceAt=date.toISOString();
-          await env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) VALUES (?,?,?,?,?,'pending',?,NULL,?,NULL)").bind(id,account.customer_id,service,Math.round(final*100),"BYN",now,serviceAt).run();
-          await env.DB.prepare("INSERT INTO customer_order_loyalty (order_id,customer_id,points_used,refunded_at,created_at) VALUES (?,?,?,NULL,?)").bind(id,account.customer_id,used,now).run();
-          if(used>0) await env.DB.prepare("UPDATE customer_loyalty SET points=points-? WHERE customer_id=? AND points>=?").bind(used,account.customer_id,used).run();
+          const orderBatch = await env.DB.batch([
+            env.DB.prepare("INSERT INTO orders (id,customer_id,service,amount_minor,currency,status,created_at,paid_at,service_at,reminder_sent_at) SELECT ?,?,?,?,?, 'pending',?,NULL,?,NULL WHERE ?=0 OR EXISTS (SELECT 1 FROM customer_loyalty WHERE customer_id=? AND points>=?)")
+              .bind(id,account.customer_id,service,Math.round(final*100),"BYN",now,serviceAt,used,account.customer_id,used),
+            env.DB.prepare("INSERT INTO customer_order_loyalty (order_id,customer_id,points_used,refunded_at,created_at) SELECT ?,?,?,NULL,? WHERE EXISTS (SELECT 1 FROM orders WHERE id=?)")
+              .bind(id,account.customer_id,used,now,id),
+            env.DB.prepare("UPDATE customer_loyalty SET points=points-? WHERE customer_id=? AND points>=? AND ?>0 AND EXISTS (SELECT 1 FROM orders WHERE id=?)")
+              .bind(used,account.customer_id,used,used,id)
+          ]);
+          if (!orderBatch[0]?.meta?.changes) {
+            return json({error:"Баланс бонусов изменился. Обновите страницу и повторите оформление заказа."},409,origin);
+          }
           const dateText=date.toLocaleString("ru-RU",{timeZone:"Europe/Minsk"}),price=base?final.toLocaleString("ru-RU",{minimumFractionDigits:2})+" BYN (предварительно)":"уточняется";
           const msg="Получена ваша заявка TrueShine. Услуга: "+title+". Дата: "+dateText+" (Минск). Стоимость: "+price+". Статус: новая, ожидает подтверждения.";
           const notice=await notifyCustomer(env,account,"Заявка TrueShine получена",msg);let group="failed";
