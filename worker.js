@@ -483,7 +483,7 @@ export default {
         }
       } catch (error) {
         console.error("[TrueShine] CRM request failed", { path: url.pathname, message: String(error?.message || "unknown").slice(0, 300) });
-        if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({error:"A customer with this phone number already exists"},409,origin);
+        if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({error:"This phone number or linked account email is already assigned to another record."},409,origin);
         return json({error:"CRM database request failed"},500,origin);
       }
       return json({error:"Not found"},404,origin);
