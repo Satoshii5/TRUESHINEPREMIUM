@@ -372,6 +372,16 @@ export default {
             .bind(id,name,phone,email||null,telegramChatId||null,language,notes,smsConsent,smsConsent?now:null,clientStatus,discountPercent,now,now).run();
           return json({ ok: true, id }, 201, origin);
         }
+        if (url.pathname === "/crm/customers/archive" && request.method === "POST") {
+          const id = safe(body.id);
+          if (!id) return json({ error: "Customer ID is required" }, 400, origin);
+          const existing = await env.DB.prepare("SELECT id FROM customers WHERE id=?").bind(id).first();
+          if (!existing) return json({ error: "Customer not found" }, 404, origin);
+          const result = await env.DB.prepare("UPDATE customers SET client_status='Удалён',sms_consent=0,sms_consent_at=NULL,updated_at=? WHERE id=?")
+            .bind(new Date().toISOString(), id).run();
+          if (!result.success || result.meta?.changes === 0) return json({ error: "Customer could not be archived" }, 500, origin);
+          return json({ ok: true, id, archived: true }, 200, origin);
+        }
         if (url.pathname === "/crm/customers/update" && request.method === "POST") {
           const id = safe(body.id), name = safe(body.name), phone = safe(body.phone), email = safe(body.email), telegramChatId = safe(body.telegramChatId), language = ["ru","en","de"].includes(body.language)?body.language:"ru", notes = safe(body.notes), clientStatus = safe(body.clientStatus || "Новый").slice(0,60), discountPercent = Number(body.discountPercent ?? 0);
           if (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 100) return json({ error: "Discount must be an integer from 0 to 100" }, 400, origin);
