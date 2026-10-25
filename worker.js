@@ -246,30 +246,37 @@ export default {
           const phoneNorm = normalizePhone(phone);
           if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\+[1-9]\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128) return json({ error: "Укажите имя, корректный email, телефон в международном формате и пароль от 10 символов." }, 400, origin);
           const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE email=? COLLATE NOCASE OR phone_norm=?").bind(email, phoneNorm).first();
-          if (existingAccount) return json({ error: "Аккаунт с таким email или телефоном уже существует. Войдите в аккаунт." }, 409, origin);
-          const all = await env.DB.prepare("SELECT id,phone,email FROM customers WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 5000").all();
+          if (existingAccount) return json({ error: "Аккаунт с таким email или телефоном уже зарегистрирован. Войдите в него или восстановите доступ." }, 409, origin);
+
+          // Reuse an existing CRM customer only when BOTH independently supplied identifiers match.
+          // This preserves orders/history without allowing a public signup to claim a record by phone OR email alone.
+          const all = await env.DB.prepare("SELECT id,name,phone,email,telegram_chat_id,language,notes,client_status,discount_percent FROM customers WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 5000").all();
           const rows = all.results || [];
-          const matchingCustomer = rows.find(c =>
-            (phoneNorm && normalizePhone(c.phone) === phoneNorm) ||
-            (email && String(c.email || "").trim().toLowerCase() === email)
-          );
+          const phoneMatches = rows.filter(c => phoneNorm && normalizePhone(c.phone) === phoneNorm);
+          const emailMatches = rows.filter(c => email && String(c.email || "").trim().toLowerCase() === email);
+          const matchingCustomer = rows.find(c => phoneNorm && normalizePhone(c.phone) === phoneNorm && email && String(c.email || "").trim().toLowerCase() === email);
+          if ((phoneMatches.length || emailMatches.length) && !matchingCustomer) {
+            return json({ error: "Телефон или email уже есть в клиентской базе, но данные не совпадают полностью. Чтобы не потерять заказы и защитить аккаунт, проверьте телефон и email или обратитесь в TrueShine для сверки." }, 409, origin);
+          }
           if (matchingCustomer) {
-            return json({ error: "Эти данные уже есть в TrueShine. Чтобы защитить ваши заказы и бонусы, самостоятельная привязка существующей карточки отключена. Свяжитесь с TrueShine для безопасной проверки и подключения личного кабинета." }, 409, origin);
+            const linked = await env.DB.prepare("SELECT id FROM customer_accounts WHERE customer_id=?").bind(matchingCustomer.id).first();
+            if (linked) return json({ error: "Для этой клиентской карточки уже создан личный кабинет. Войдите в существующий аккаунт или обратитесь в поддержку для восстановления доступа." }, 409, origin);
           }
           const now = new Date().toISOString();
-          const customerId = crypto.randomUUID();
+          const customerId = matchingCustomer ? matchingCustomer.id : crypto.randomUUID();
           const accountId = crypto.randomUUID();
           const salt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
           const passwordDigest = await passwordHash(password, salt);
           const cardNumber = "TS-" + Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
-          await env.DB.batch([
-            env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)")
-              .bind(customerId, name, phone, email, now, now),
-            env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)")
-              .bind(accountId, customerId, email, phoneNorm, salt, passwordDigest, now),
-            env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)")
-              .bind(customerId, cardNumber, now)
-          ]);
+          const statements = [];
+          if (matchingCustomer) {
+            statements.push(env.DB.prepare("UPDATE customers SET name=?,email=?,phone=?,updated_at=? WHERE id=?").bind(name, email, phone, now, customerId));
+          } else {
+            statements.push(env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)").bind(customerId, name, phone, email, now, now));
+          }
+          statements.push(env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)").bind(accountId, customerId, email, phoneNorm, salt, passwordDigest, now));
+          statements.push(env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(customerId, cardNumber, now));
+          await env.DB.batch(statements);
           const session = await issueSession(accountId);
           return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email, phone } }, 201, origin);
         }
