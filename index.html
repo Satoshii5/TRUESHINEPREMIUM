@@ -382,6 +382,36 @@ a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid #b7
 .included-gallery figure:hover img{transform:scale(1.045);filter:saturate(1.08)}
 .included-gallery figcaption{position:absolute;inset:auto 0 0;padding:32px 18px 14px;color:white;font-weight:700;font-size:13px;background:linear-gradient(0deg,#071e17c9,transparent)}
 @media(max-width:760px){.included-gallery{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.included-gallery figure,.included-gallery img{min-height:105px;max-height:125px;border-radius:12px}.included-gallery figcaption{font-size:10px;padding:20px 7px 8px}}
+
+/* TrueShine Premium visual refresh v2 — 2026-10-25 */
+:root{--forest:#0c2922;--forest2:#174638;--forest3:#2b6550;--sage:#e3e9df;--ivory:#f8f6f0;--paper:#fffdf8;--brass:#c3a46b;--brass-light:#f0d9a3;--ink:#172720;--muted:#68776e;--line:#e5e2d7;--shadow:0 24px 70px #0c29221c}
+body{background:var(--ivory)}
+.site-header{background:rgba(248,246,240,.92);box-shadow:0 8px 28px #0c29220a}
+.brand-logo{filter:drop-shadow(0 5px 10px #0c29221a)}
+.btn{box-shadow:0 8px 22px #c3a46b20;transition:transform .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s,background .28s}
+.btn:hover{transform:translateY(-3px);box-shadow:0 14px 28px #c3a46b38}
+.btn-dark{box-shadow:0 8px 24px #0c292225}
+.hero{min-height:690px}
+.hero:before{background:linear-gradient(90deg,#071e18 0%,#0c2922ed 36%,#0c2922a0 67%,#0c292247 100%),url("https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=2000&q=85") center 55%/cover no-repeat}
+.hero-panel{border-color:#f0d9a37a;box-shadow:0 24px 70px #0002}
+.trust-item{transition:background .25s,transform .25s}
+.trust-item:hover{background:#f5f0e4;transform:translateY(-2px)}
+.service-card{border-radius:18px;overflow:hidden;box-shadow:0 5px 18px #0c292208}
+.service-card:before{content:"";position:absolute;left:0;top:0;width:100%;height:3px;background:linear-gradient(90deg,var(--brass),#f0d9a3,var(--forest3));transform:scaleX(.18);transform-origin:left;transition:transform .35s}
+.service-card:hover:before{transform:scaleX(1)}
+.service-card:hover{box-shadow:0 22px 50px #0c29221a}
+.audience-card,.business-visual{border-radius:20px}
+.partner,.calculator,.plan,.form-card{border-radius:18px;overflow:hidden}
+.partner{transition:transform .25s,box-shadow .25s}
+.partner:hover{transform:translateY(-3px);box-shadow:0 15px 35px #0c292212}
+.calc-summary{border-radius:0 18px 18px 0}
+.section-head h2,.hero h1{ text-wrap:balance }
+.eyebrow{letter-spacing:.24em}
+@keyframes tsGlow{0%,100%{box-shadow:0 0 0 0 #c3a46b00}50%{box-shadow:0 0 0 7px #c3a46b16}}
+.nav-cta:hover{animation:tsGlow 1.4s ease-in-out}
+@media(max-width:700px){.hero{min-height:0}.hero-grid{gap:32px;padding:66px 0}.hero-panel{justify-self:stretch;max-width:none}.trust-item{padding:17px 12px}.service-card{padding:23px}.calc-summary{border-radius:0}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
 </style>
 </head>
 <body>
