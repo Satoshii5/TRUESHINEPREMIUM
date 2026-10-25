@@ -52,7 +52,7 @@ if (!worker.includes("if (linked) return json({ error: \"Для этого те�
 if (!html.includes('id="accountRegister"') || /<form id="accountRegister"[\\s\\S]*?<label[^>]*>\\s*Email\\s*<input[^>]*required/i.test(html)) {
   fail.push("Customer registration must not require email");
 }
-if (!worker.includes("Email необязателен.") || !worker.includes('const accountEmail = email || ("phone-" + phoneNorm.replace(/\\D/g, "") + "@noemail.trueshine.invalid")')) {
+if (!worker.includes("Email необязателен.") || !worker.includes('const accountEmail = email || ("phone-" + phoneNorm.replace(/\\D/g, "") + "-" + crypto.randomUUID() + "@noemail.trueshine.invalid")')) {
   fail.push("Phone-only registration backend fallback was not found");
 }
 if (!worker.includes("const orderBatch = await env.DB.batch")) fail.push("Atomic order and loyalty redemption batch was not found");
