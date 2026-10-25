@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Disallow: /crm.html
+Sitemap: https://satoshii5.github.io/TRUESHINEPREMIUM/sitemap.xml
