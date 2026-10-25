@@ -37,6 +37,7 @@ if (!worker.includes("async function checkRateLimit")) fail.push("API rate limit
 if (!worker.includes('"chat", 30, 10 * 60 * 1000')) fail.push("AI chat rate limit was not found");
 if (!worker.includes('"lead", 8, 10 * 60 * 1000')) fail.push("Lead form rate limit was not found");
 if (!worker.includes("const orderBatch = await env.DB.batch")) fail.push("Atomic order and loyalty redemption batch was not found");
+if (!worker.includes("UPDATE customer_accounts SET email=CASE WHEN ?<>'' THEN ? ELSE email END,phone_norm=? WHERE customer_id=?")) fail.push("CRM-to-account contact synchronization was not found");
 if (!worker.includes('"X-Content-Type-Options": "nosniff"')) fail.push("Security response headers were not found");
 if (!crm.includes("TrueShine CRM")) fail.push("CRM HTML title is missing");
 
