@@ -245,6 +245,10 @@ export default {
         const accountInfo = await env.DB.prepare("PRAGMA table_info(customer_accounts)").all();
         const accountColumns = new Set((accountInfo.results || []).map(column => column.name));
         const accountMigrations = [
+          // Older installations may have a pre-account table shape. Add every field
+          // referenced by migration queries before selecting or joining on it.
+          ["id", "TEXT"],
+          ["customer_id", "TEXT"],
           ["email", "TEXT"],
           ["phone_norm", "TEXT"],
           ["password_salt", "TEXT"],
@@ -437,7 +441,7 @@ export default {
       } catch (error) {
         console.error("[TrueShine] Account handler failed", { path: url.pathname, message: String(error?.message || "unknown").slice(0, 300) });
         if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({ error: "Аккаунт с таким телефоном уже зарегистрирован. Войдите по номеру телефона." }, 409, origin);
-        return json({ error: "Не удалось обработать аккаунт. Попробуйте позже.", diagnostic: String(error?.message || "unknown").slice(0, 220) }, 500, origin);
+        return json({ error: "Не удалось обработать аккаунт. Попробуйте позже." }, 500, origin);
       }
       return json({ error: "Not found" }, 404, origin);
     }
