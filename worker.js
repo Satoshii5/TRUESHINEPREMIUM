@@ -244,23 +244,22 @@ export default {
         if (url.pathname === "/account/register" && request.method === "POST") {
           const name = clean(body.name), email = clean(body.email).toLowerCase(), phone = clean(body.phone), password = String(body.password || "");
           const phoneNorm = normalizePhone(phone);
-          if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\+[1-9]\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128) return json({ error: "Укажите имя, корректный email, телефон в международном формате и пароль от 10 символов." }, 400, origin);
-          const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE email=? COLLATE NOCASE OR phone_norm=?").bind(email, phoneNorm).first();
-          if (existingAccount) return json({ error: "Аккаунт с таким email или телефоном уже зарегистрирован. Войдите в него или восстановите доступ." }, 409, origin);
+          if (name.length < 2 || !/^\+[1-9]\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return json({ error: "Укажите имя, телефон в международном формате и пароль от 10 символов. Email необязателен." }, 400, origin);
+          const accountEmail = email || ("phone-" + phoneNorm.replace(/\D/g, "") + "@noemail.trueshine.invalid");
+          const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE phone_norm=? OR (?<>'' AND email=? COLLATE NOCASE)").bind(phoneNorm, email, email).first();
+          if (existingAccount) return json({ error: "Аккаунт с таким телефоном уже существует. Перейдите во вкладку «Вход» и войдите по номеру телефона." }, 409, origin);
 
-          // Reuse an existing CRM customer only when BOTH independently supplied identifiers match.
-          // This preserves orders/history without allowing a public signup to claim a record by phone OR email alone.
-          const all = await env.DB.prepare("SELECT id,name,phone,email,telegram_chat_id,language,notes,client_status,discount_percent FROM customers WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 5000").all();
+          // Phone is the primary customer identity. Reuse an existing CRM row to preserve order history.
+          const all = await env.DB.prepare("SELECT id,name,phone,email,telegram_chat_id,language,notes,client_status,discount_percent FROM customers WHERE phone IS NOT NULL LIMIT 5000").all();
           const rows = all.results || [];
-          const phoneMatches = rows.filter(c => phoneNorm && normalizePhone(c.phone) === phoneNorm);
-          const emailMatches = rows.filter(c => email && String(c.email || "").trim().toLowerCase() === email);
-          const matchingCustomer = rows.find(c => phoneNorm && normalizePhone(c.phone) === phoneNorm && email && String(c.email || "").trim().toLowerCase() === email);
-          if ((phoneMatches.length || emailMatches.length) && !matchingCustomer) {
-            return json({ error: "Телефон или email уже есть в клиентской базе, но данные не совпадают полностью. Чтобы не потерять заказы и защитить аккаунт, проверьте телефон и email или обратитесь в TrueShine для сверки." }, 409, origin);
+          const matchingCustomer = rows.find(c => phoneNorm && normalizePhone(c.phone) === phoneNorm);
+          if (email) {
+            const emailAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE email=? COLLATE NOCASE").bind(email).first();
+            if (emailAccount) return json({ error: "Этот email уже связан с другим аккаунтом. Уберите email или обратитесь в поддержку." }, 409, origin);
           }
           if (matchingCustomer) {
             const linked = await env.DB.prepare("SELECT id FROM customer_accounts WHERE customer_id=?").bind(matchingCustomer.id).first();
-            if (linked) return json({ error: "Для этой клиентской карточки уже создан личный кабинет. Войдите в существующий аккаунт или обратитесь в поддержку для восстановления доступа." }, 409, origin);
+            if (linked) return json({ error: "Для этого телефона уже есть личный кабинет. Войдите по номеру телефона; данные и история заказов сохранены." }, 409, origin);
           }
           const now = new Date().toISOString();
           const customerId = matchingCustomer ? matchingCustomer.id : crypto.randomUUID();
@@ -270,20 +269,21 @@ export default {
           const cardNumber = "TS-" + Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
           const statements = [];
           if (matchingCustomer) {
-            statements.push(env.DB.prepare("UPDATE customers SET name=?,email=?,phone=?,updated_at=? WHERE id=?").bind(name, email, phone, now, customerId));
+            statements.push(env.DB.prepare("UPDATE customers SET name=?,email=CASE WHEN ?<>'' THEN ? ELSE email END,phone=?,updated_at=? WHERE id=?").bind(name, email, email, phone, now, customerId));
           } else {
-            statements.push(env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)").bind(customerId, name, phone, email, now, now));
+            statements.push(env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)").bind(customerId, name, phone, email || null, now, now));
           }
-          statements.push(env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)").bind(accountId, customerId, email, phoneNorm, salt, passwordDigest, now));
+          statements.push(env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)").bind(accountId, customerId, accountEmail, phoneNorm, salt, passwordDigest, now));
           statements.push(env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(customerId, cardNumber, now));
           await env.DB.batch(statements);
           const session = await issueSession(accountId);
-          return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email, phone } }, 201, origin);
+          return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email: email || null, phone } }, 201, origin);
         }
         if (url.pathname === "/account/login" && request.method === "POST") {
-          const email = clean(body.email).toLowerCase(), password = String(body.password || "");
-          const account = await env.DB.prepare("SELECT a.id,a.customer_id,a.email,a.password_salt,a.password_hash,c.name,c.phone FROM customer_accounts a JOIN customers c ON c.id=a.customer_id WHERE a.email=? COLLATE NOCASE").bind(email).first();
-          if (!account || !password || await passwordHash(password, account.password_salt) !== account.password_hash) return json({ error: "Неверный email или пароль." }, 401, origin);
+          const login = clean(body.phone || body.email).toLowerCase(), password = String(body.password || "");
+          const loginPhone = normalizePhone(login);
+          const account = await env.DB.prepare("SELECT a.id,a.customer_id,a.email,a.password_salt,a.password_hash,c.name,c.phone FROM customer_accounts a JOIN customers c ON c.id=a.customer_id WHERE a.phone_norm=? OR a.email=? COLLATE NOCASE").bind(loginPhone, login).first();
+          if (!account || !password || await passwordHash(password, account.password_salt) !== account.password_hash) return json({ error: "Неверный телефон или пароль." }, 401, origin);
           const session = await issueSession(account.id);
           return json({ ok: true, token: session, customer: { name: account.name, email: account.email, phone: account.phone } }, 200, origin);
         }
@@ -340,7 +340,7 @@ export default {
         }
       } catch (error) {
         console.error("[TrueShine] Account handler failed", { path: url.pathname, message: String(error?.message || "unknown").slice(0, 300) });
-        if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({ error: "Аккаунт с таким email или телефоном уже зарегистрирован." }, 409, origin);
+        if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({ error: "Аккаунт с таким телефоном уже зарегистрирован. Войдите по номеру телефона." }, 409, origin);
         return json({ error: "Не удалось обработать аккаунт. Попробуйте позже." }, 500, origin);
       }
       return json({ error: "Not found" }, 404, origin);
