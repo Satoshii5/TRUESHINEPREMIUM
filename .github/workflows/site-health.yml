@@ -1,0 +1,39 @@
+name: TrueShine published-site health and recovery
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: read
+concurrency:
+  group: trueshine-site-health
+  cancel-in-progress: true
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check published website
+        id: check
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          URL="https://satoshii5.github.io/TRUESHINEPREMIUM/"
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 8 "$URL" -o /tmp/trueshine.html
+          grep -qi "TrueShine" /tmp/trueshine.html
+          grep -q 'id="included"' /tmp/trueshine.html
+          grep -q 'id="calculator"' /tmp/trueshine.html
+          grep -q 'id="leadForm"' /tmp/trueshine.html
+          echo "Published site responds and includes key conversion sections."
+      - name: Attempt recovery by re-running Pages deployment
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run pages.yml --ref main
+          echo "Health check failed. Requested a fresh Pages deployment; source-code failures still require a code fix."
+      - name: Fail health run if site is still unhealthy
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::Published site health check failed. A Pages redeployment was requested; inspect the Actions logs and deployment status."
+          exit 1
