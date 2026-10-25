@@ -380,8 +380,13 @@ export default {
           const smsConsent = body.smsConsent === true ? 1 : 0;
           const now = new Date().toISOString();
           const consentAt = smsConsent ? (existing.sms_consent ? existing.sms_consent_at : now) : null;
-          await env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,telegram_chat_id=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,client_status=?,discount_percent=?,updated_at=? WHERE id=?")
-            .bind(name,phone,email||null,telegramChatId||null,language,notes,smsConsent,consentAt,clientStatus,discountPercent,now,id).run();
+          await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
+          await env.DB.batch([
+            env.DB.prepare("UPDATE customers SET name=?,phone=?,email=?,telegram_chat_id=?,language=?,notes=?,sms_consent=?,sms_consent_at=?,client_status=?,discount_percent=?,updated_at=? WHERE id=?")
+              .bind(name,phone,email||null,telegramChatId||null,language,notes,smsConsent,consentAt,clientStatus,discountPercent,now,id),
+            env.DB.prepare("UPDATE customer_accounts SET email=CASE WHEN ?<>'' THEN ? ELSE email END,phone_norm=? WHERE customer_id=?")
+              .bind(email,email,normalizePhone(phone),id)
+          ]);
           return json({ ok: true, id }, 200, origin);
         }
         if (url.pathname === "/crm/orders" && request.method === "GET") {
