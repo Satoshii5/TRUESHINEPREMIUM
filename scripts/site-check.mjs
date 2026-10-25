@@ -41,16 +41,29 @@ if (!worker.includes("UPDATE customer_accounts SET email=CASE WHEN ?<>'' THEN ? 
 if (!worker.includes('"X-Content-Type-Options": "nosniff"')) fail.push("Security response headers were not found");
 if (!crm.includes("TrueShine CRM")) fail.push("CRM HTML title is missing");
 
-const inlineScripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
-  .filter((m) => !/\bsrc=["']/.test(m[0]) && !m[0].toLowerCase().includes('type="application/ld+json') && !m[0].toLowerCase().includes("type='application/ld+json"));
-for (let i = 0; i < inlineScripts.length; i++) {
-  try { new Function(inlineScripts[i][1]); }
-  catch (error) { fail.push("Inline JavaScript syntax error in block " + (i + 1) + ": " + error.message); }
+for (const [sourceName, source] of [["index.html", html], ["crm.html", crm]]) {
+  const inlineScripts = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
+    .filter((m) => !/\bsrc=["']/.test(m[0]) && !m[0].toLowerCase().includes('type="application/ld+json') && !m[0].toLowerCase().includes("type='application/ld+json"));
+  for (let i = 0; i < inlineScripts.length; i++) {
+    try { new Function(inlineScripts[i][1]); }
+    catch (error) { fail.push(sourceName + " inline JavaScript syntax error in block " + (i + 1) + ": " + error.message); }
+  }
 }
+
+const jsonLd = html.match(/<script\s+type=["']application\/ld\+json["']>([\s\S]*?)<\/script>/i);
+if (!jsonLd) fail.push("CleaningService structured data is missing");
+else {
+  try { JSON.parse(jsonLd[1]); }
+  catch (error) { fail.push("CleaningService structured data is invalid JSON: " + error.message); }
+}
+const robots = readFileSync("robots.txt", "utf8");
+const sitemap = readFileSync("sitemap.xml", "utf8");
+if (!robots.includes("Sitemap: https://satoshii5.github.io/TRUESHINEPREMIUM/sitemap.xml")) fail.push("robots.txt sitemap declaration is missing");
+if (!sitemap.includes("https://satoshii5.github.io/TRUESHINEPREMIUM/")) fail.push("sitemap.xml canonical URL is missing");
 
 if (fail.length) {
   console.error("TrueShine site checks FAILED:");
   for (const item of fail) console.error(" - " + item);
   process.exit(1);
 }
-console.log("TrueShine checks passed: HTML anchors/IDs, key sections, inline JS syntax, subscription price sync, CRM access guard and session expiry.");
+console.log("TrueShine checks passed: website/CRM JavaScript syntax, HTML anchors/IDs, structured data, sitemap, subscription price sync, rate limits, CRM access guard, session expiry and transactional loyalty redemption.");
