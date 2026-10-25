@@ -409,7 +409,7 @@ export default {
             }));
           }
           statements.push(await buildCompatibleInsert("customer_accounts", {
-            id: accountId, customer_id: customerId, email: accountEmail, phone_norm: phoneNorm,
+            id: accountId, customer_id: customerId, name, phone, email: accountEmail, phone_norm: phoneNorm,
             password_salt: salt, password_hash: passwordDigest, created_at: now
           }));
           statements.push(await buildCompatibleInsert("customer_loyalty", {
