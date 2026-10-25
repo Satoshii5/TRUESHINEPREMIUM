@@ -437,7 +437,7 @@ export default {
       } catch (error) {
         console.error("[TrueShine] Account handler failed", { path: url.pathname, message: String(error?.message || "unknown").slice(0, 300) });
         if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({ error: "Аккаунт с таким телефоном уже зарегистрирован. Войдите по номеру телефона." }, 409, origin);
-        return json({ error: "Не удалось обработать аккаунт. Попробуйте позже." }, 500, origin);
+        return json({ error: "Не удалось обработать аккаунт. Попробуйте позже.", diagnostic: String(error?.message || "unknown").slice(0, 220) }, 500, origin);
       }
       return json({ error: "Not found" }, 404, origin);
     }
