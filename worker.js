@@ -262,18 +262,25 @@ export default {
         // If historical duplicate accounts share a phone, preserve every row and assign the phone
         // index to the oldest usable row only; registration will still detect the linked customer.
         const legacyAccounts = await env.DB.prepare("SELECT a.id,a.phone_norm,c.phone FROM customer_accounts a LEFT JOIN customers c ON c.id=a.customer_id ORDER BY a.created_at ASC").all();
-        const claimedAccountPhones = new Set();
+        // Reserve all existing phone identities before backfilling. In a one-pass migration,
+        // an older empty row could be updated before a later duplicate is encountered and
+        // violate a legacy UNIQUE constraint, taking the entire account API offline.
+        const claimedAccountPhones = new Set(
+          (legacyAccounts.results || []).map(account => String(account.phone_norm || "")).filter(Boolean)
+        );
         for (const account of (legacyAccounts.results || [])) {
-          const savedPhone = String(account.phone_norm || "");
-          const normalizedPhone = savedPhone || normalizePhone(account.phone);
-          if (!normalizedPhone) continue;
-          if (savedPhone) {
-            claimedAccountPhones.add(savedPhone);
-            continue;
+          if (String(account.phone_norm || "")) continue;
+          const normalizedPhone = normalizePhone(account.phone);
+          if (!normalizedPhone || claimedAccountPhones.has(normalizedPhone)) continue;
+          try {
+            await env.DB.prepare("UPDATE customer_accounts SET phone_norm=? WHERE id=? AND (phone_norm IS NULL OR phone_norm='')").bind(normalizedPhone, account.id).run();
+            claimedAccountPhones.add(normalizedPhone);
+          } catch (migrationError) {
+            // Keep legacy duplicate accounts intact; one conflicting row must not block sign-up.
+            console.error("[TrueShine] Skipped conflicting legacy phone backfill", {
+              message: String(migrationError?.message || "unknown").slice(0, 160)
+            });
           }
-          if (claimedAccountPhones.has(normalizedPhone)) continue;
-          await env.DB.prepare("UPDATE customer_accounts SET phone_norm=? WHERE id=?").bind(normalizedPhone, account.id).run();
-          claimedAccountPhones.add(normalizedPhone);
         }
         try {
           await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_accounts_phone_norm ON customer_accounts(phone_norm) WHERE phone_norm IS NOT NULL").run();
