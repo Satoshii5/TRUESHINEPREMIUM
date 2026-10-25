@@ -376,7 +376,11 @@ export default {
           const name = clean(body.name), email = clean(body.email).toLowerCase(), phone = clean(body.phone), password = String(body.password || "");
           const phoneNorm = normalizePhone(phone);
           if (name.length < 2 || !/^\+[1-9]\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return json({ error: "Укажите имя, телефон в международном формате и пароль от 10 символов. Email необязателен." }, 400, origin);
-          const accountEmail = email || ("phone-" + phoneNorm.replace(/\D/g, "") + "@noemail.trueshine.invalid");
+          // Use a unique internal placeholder when email is omitted. Older accounts may
+          // already contain a deterministic phone-based placeholder email even when their
+          // phone_norm migration is incomplete; reusing it can turn registration into a
+          // database UNIQUE error instead of a recoverable account conflict.
+          const accountEmail = email || ("phone-" + phoneNorm.replace(/\D/g, "") + "-" + crypto.randomUUID() + "@noemail.trueshine.invalid");
           const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE phone_norm=? OR (?<>'' AND email=? COLLATE NOCASE)").bind(phoneNorm, email, email).first();
           if (existingAccount) return json({ error: "Аккаунт с таким телефоном уже существует. Перейдите во вкладку «Вход» и войдите по номеру телефона." }, 409, origin);
 
