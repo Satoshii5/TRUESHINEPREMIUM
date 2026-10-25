@@ -49,6 +49,20 @@ async function sendTelegramChat(env, chatId, text, replyMarkup) {
 function normalizePhone(value) {
   return String(value || "").replace(/[^0-9]/g, "").replace(/^00/, "");
 }
+async function checkRateLimit(env, request, bucket, limit, windowMs) {
+  if (!env.DB) throw new Error("Rate-limit storage is unavailable");
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS api_rate_limits (rate_key TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, hits INTEGER NOT NULL, updated_at INTEGER NOT NULL)").run();
+  const forwarded = request.headers.get("CF-Connecting-IP") || (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim();
+  const ip = forwarded || "unknown";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bucket + ":" + ip));
+  const key = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const now = Date.now(), cutoff = now - windowMs;
+  await env.DB.prepare("INSERT INTO api_rate_limits (rate_key,window_started_at,hits,updated_at) VALUES (?,?,1,?) ON CONFLICT(rate_key) DO UPDATE SET hits=CASE WHEN api_rate_limits.window_started_at<=? THEN 1 ELSE api_rate_limits.hits+1 END, window_started_at=CASE WHEN api_rate_limits.window_started_at<=? THEN excluded.window_started_at ELSE api_rate_limits.window_started_at END, updated_at=excluded.updated_at")
+    .bind(key, now, now, cutoff, cutoff).run();
+  const row = await env.DB.prepare("SELECT hits,window_started_at FROM api_rate_limits WHERE rate_key=?").bind(key).first();
+  const retryAfter = Math.max(1, Math.ceil((Number(row?.window_started_at || now) + windowMs - now) / 1000));
+  return { allowed: Number(row?.hits || 0) <= limit, retryAfter };
+}
 async function handleTelegramWebhook(request, env, update) {
   if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
     return new Response("Forbidden", { status: 403 });
@@ -130,6 +144,13 @@ export default {
     if (url.pathname.endsWith("/chat")) {
       const message = String(body.message || "").trim().slice(0, 2000);
       if (!message) return json({ error: "Message is required" }, 400, origin);
+      try {
+        const rate = await checkRateLimit(env, request, "chat", 30, 10 * 60 * 1000);
+        if (!rate.allowed) return json({ error: "Слишком много сообщений. Повторите через " + rate.retryAfter + " сек." }, 429, origin);
+      } catch (error) {
+        console.error("[TrueShine] Chat rate-limit check failed", { message: String(error?.message || "unknown").slice(0, 200) });
+        return json({ error: "Чат временно недоступен. Попробуйте позже." }, 503, origin);
+      }
       if (!env.OPENAI_API_KEY) return json({ error: "AI is not configured" }, 503, origin);
       try {
         const response = await fetch("https://api.openai.com/v1/responses", {
@@ -155,6 +176,13 @@ export default {
       }
     }
     if (url.pathname.endsWith("/lead")) {
+      try {
+        const rate = await checkRateLimit(env, request, "lead", 8, 10 * 60 * 1000);
+        if (!rate.allowed) return json({ error: "Слишком много заявок с этого подключения. Повторите через " + rate.retryAfter + " сек." }, 429, origin);
+      } catch (error) {
+        console.error("[TrueShine] Lead rate-limit check failed", { message: String(error?.message || "unknown").slice(0, 200) });
+        return json({ error: "Форма временно недоступна. Попробуйте позже или позвоните нам." }, 503, origin);
+      }
       const safe = v => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 900);
       const name = safe(body.name), phone = safe(body.phone), service = safe(body.service), details = safe(body.details);
       const kind = safe(body.kind) || "Заявка";
@@ -203,6 +231,10 @@ export default {
       };
       try {
         await ensureTables();
+        if (url.pathname === "/account/register" || url.pathname === "/account/login") {
+          const rate = await checkRateLimit(env, request, url.pathname === "/account/register" ? "register" : "login", url.pathname === "/account/register" ? 5 : 10, 15 * 60 * 1000);
+          if (!rate.allowed) return json({ error: "Слишком много попыток. Повторите через " + rate.retryAfter + " сек." }, 429, origin);
+        }
         if (url.pathname === "/account/register" && request.method === "POST") {
           const name = clean(body.name), email = clean(body.email).toLowerCase(), phone = clean(body.phone), password = String(body.password || "");
           const phoneNorm = normalizePhone(phone);
