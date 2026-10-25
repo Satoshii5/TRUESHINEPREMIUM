@@ -320,6 +320,37 @@ export default {
           ["refunded_at", "TEXT"], ["created_at", "TEXT"]
         ]);
       };
+      // Build inserts from the live D1 schema. The CRM database has evolved over
+      // time, so legacy tables may contain additional NOT NULL columns not known to
+      // the current site. Populate those safely instead of failing every registration.
+      const buildCompatibleInsert = async (table, supplied, { ignore = false } = {}) => {
+        const allowedTables = new Set(["customers", "customer_accounts", "customer_sessions", "customer_loyalty"]);
+        if (!allowedTables.has(table)) throw new Error("Unsupported compatibility insert table");
+        const info = await env.DB.prepare("PRAGMA table_info(" + table + ")").all();
+        const columns = info.results || [];
+        if (!columns.length) throw new Error("Missing table schema: " + table);
+        const values = { ...supplied };
+        const now = new Date().toISOString();
+        for (const column of columns) {
+          if (Object.prototype.hasOwnProperty.call(values, column.name)) continue;
+          if (!column.notnull || column.dflt_value !== null && column.dflt_value !== undefined || (column.pk && /^INTEGER$/i.test(String(column.type || "")))) continue;
+          const key = String(column.name).toLowerCase();
+          if (key === "id" || key.endsWith("_id") || key.includes("uuid")) values[column.name] = crypto.randomUUID();
+          else if (key.includes("phone")) values[column.name] = supplied.phone || "";
+          else if (key.includes("email")) values[column.name] = supplied.email || "";
+          else if (key.includes("name")) values[column.name] = supplied.name || "Клиент";
+          else if (key.includes("created") || key.includes("updated") || key.endsWith("_at") || key.includes("date")) values[column.name] = now;
+          else if (key.includes("status")) values[column.name] = "Новый";
+          else if (key.includes("language")) values[column.name] = "ru";
+          else if (key.includes("consent") || key.includes("active") || key.includes("enabled")) values[column.name] = 0;
+          else if (/INT|REAL|NUM|DEC|BOOL/i.test(String(column.type || ""))) values[column.name] = 0;
+          else values[column.name] = "";
+        }
+        const names = columns.filter(column => Object.prototype.hasOwnProperty.call(values, column.name)).map(column => column.name);
+        const quoted = names.map(name => '"' + name.replace(/"/g, '""') + '"').join(",");
+        const placeholders = names.map(() => "?").join(",");
+        return env.DB.prepare("INSERT " + (ignore ? "OR IGNORE " : "") + "INTO " + table + " (" + quoted + ") VALUES (" + placeholders + ")").bind(...names.map(name => values[name]));
+      };
       const hashText = async value => {
         const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
         return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -332,7 +363,7 @@ export default {
       const issueSession = async accountId => {
         const raw = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, "0")).join("");
         const now = new Date(), expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
-        await env.DB.prepare("INSERT INTO customer_sessions (token_hash,account_id,expires_at,created_at) VALUES (?,?,?,?)").bind(await hashText(raw), accountId, expires, now.toISOString()).run();
+        await (await buildCompatibleInsert("customer_sessions", { token_hash: await hashText(raw), account_id: accountId, expires_at: expires, created_at: now.toISOString() })).run();
         return raw;
       };
       try {
@@ -371,10 +402,19 @@ export default {
           if (matchingCustomer) {
             statements.push(env.DB.prepare("UPDATE customers SET name=?,email=CASE WHEN ?<>'' THEN ? ELSE email END,phone=?,updated_at=? WHERE id=?").bind(name, email, email, phone, now, customerId));
           } else {
-            statements.push(env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)").bind(customerId, name, phone, email || accountEmail, now, now));
+            statements.push(await buildCompatibleInsert("customers", {
+              id: customerId, name, phone, email: email || accountEmail, telegram_chat_id: null,
+              language: "ru", notes: "Регистрация на сайте", sms_consent: 0, sms_consent_at: null,
+              client_status: "Новый", discount_percent: 0, created_at: now, updated_at: now
+            }));
           }
-          statements.push(env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)").bind(accountId, customerId, accountEmail, phoneNorm, salt, passwordDigest, now));
-          statements.push(env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(customerId, cardNumber, now));
+          statements.push(await buildCompatibleInsert("customer_accounts", {
+            id: accountId, customer_id: customerId, email: accountEmail, phone_norm: phoneNorm,
+            password_salt: salt, password_hash: passwordDigest, created_at: now
+          }));
+          statements.push(await buildCompatibleInsert("customer_loyalty", {
+            customer_id: customerId, card_number: cardNumber, points: 0, lifetime_points: 0, created_at: now
+          }, { ignore: true }));
           await env.DB.batch(statements);
           const session = await issueSession(accountId);
           return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email: email || null, phone } }, 201, origin);
