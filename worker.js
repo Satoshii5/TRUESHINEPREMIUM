@@ -367,7 +367,7 @@ export default {
           if (matchingCustomer) {
             statements.push(env.DB.prepare("UPDATE customers SET name=?,email=CASE WHEN ?<>'' THEN ? ELSE email END,phone=?,updated_at=? WHERE id=?").bind(name, email, email, phone, now, customerId));
           } else {
-            statements.push(env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)").bind(customerId, name, phone, email || null, now, now));
+            statements.push(env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)").bind(customerId, name, phone, email || accountEmail, now, now));
           }
           statements.push(env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)").bind(accountId, customerId, accountEmail, phoneNorm, salt, passwordDigest, now));
           statements.push(env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(customerId, cardNumber, now));
