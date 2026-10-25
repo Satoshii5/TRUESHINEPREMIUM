@@ -20,6 +20,9 @@ for (const id of ["services", "included", "calculator", "subscriptions", "team",
 for (const price of ["291,20", "504,40", "928,20"]) {
   if (!html.includes(price)) fail.push("Subscription price missing from website: " + price);
 }
+for (const price of ["+55 BYN", "+30 BYN", "80 BYN", "150 BYN", "130 BYN", "160 BYN", "200 BYN"]) {
+  if (!html.includes(price)) fail.push("Add-on service price missing from website checklist: " + price);
+}
 for (const price of ["291.2", "504.4", "928.2"]) {
   if (!worker.includes(price)) fail.push("Subscription price missing from Worker pricing rules: " + price);
 }
