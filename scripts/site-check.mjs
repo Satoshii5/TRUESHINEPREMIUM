@@ -39,6 +39,12 @@ if (!worker.includes("самостоятельная привязка сущес
 if (!worker.includes("async function checkRateLimit")) fail.push("API rate limiting helper was not found");
 if (!worker.includes('"chat", 30, 10 * 60 * 1000')) fail.push("AI chat rate limit was not found");
 if (!worker.includes('"lead", 8, 10 * 60 * 1000')) fail.push("Lead form rate limit was not found");
+if (!worker.includes('"register" : "login", url.pathname === "/account/register" ? 5 : 10, 15 * 60 * 1000')) fail.push("Registration/login brute-force throttling was not found");
+if (!worker.includes("iterations: 150000, hash: \"SHA-256\"")) fail.push("PBKDF2 password hashing strength check was not found");
+if (!worker.includes("crypto.getRandomValues(new Uint8Array(32))")) fail.push("High-entropy session token generation was not found");
+if (!worker.includes("await hashText(raw), expires")) fail.push("Session token hashing before storage was not found");
+if (!worker.includes("password.length < 10 || password.length > 128")) fail.push("Registration password length validation was not found");
+if (!worker.includes("Самостоятельная привязка существующей карточки отключена") && !worker.includes("самостоятельная привязка существующей карточки отключена")) fail.push("Existing customer account takeover protection was not found");
 if (!worker.includes("const orderBatch = await env.DB.batch")) fail.push("Atomic order and loyalty redemption batch was not found");
 if (!worker.includes("UPDATE customer_accounts SET email=CASE WHEN ?<>'' THEN ? ELSE email END,phone_norm=? WHERE customer_id=?")) fail.push("CRM-to-account contact synchronization was not found");
 if (!worker.includes('"X-Content-Type-Options": "nosniff"')) fail.push("Security response headers were not found");
@@ -69,4 +75,4 @@ if (fail.length) {
   for (const item of fail) console.error(" - " + item);
   process.exit(1);
 }
-console.log("TrueShine checks passed: website/CRM JavaScript syntax, HTML anchors/IDs, structured data, sitemap, subscription price sync, rate limits, CRM access guard, session expiry and transactional loyalty redemption.");
+console.log("TrueShine checks passed: website/CRM JavaScript syntax, HTML anchors/IDs, structured data, sitemap, pricing sync, API and registration rate limits, password hashing, session token protection, CRM access guard, account-linking protection, session expiry and transactional loyalty redemption.");
