@@ -289,8 +289,32 @@ export default {
           console.error("[TrueShine] Account phone index migration deferred", { message: String(indexError?.message || "unknown").slice(0, 200) });
         }
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
+        // Repair auxiliary tables as well: older CRM versions may have created them with
+        // only a subset of the current columns. Missing fields used during registration or
+        // session creation must not turn a valid sign-up into a generic server error.
+        const repairColumns = async (table, migrations) => {
+          const info = await env.DB.prepare("PRAGMA table_info(" + table + ")").all();
+          const columns = new Set((info.results || []).map(column => column.name));
+          for (const [column, definition] of migrations) {
+            if (!columns.has(column)) {
+              await env.DB.prepare("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition).run();
+              columns.add(column);
+            }
+          }
+        };
+        await repairColumns("customer_sessions", [
+          ["token_hash", "TEXT"], ["account_id", "TEXT"], ["expires_at", "TEXT"], ["created_at", "TEXT"]
+        ]);
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_loyalty (customer_id TEXT PRIMARY KEY, card_number TEXT NOT NULL UNIQUE, points INTEGER NOT NULL DEFAULT 0, lifetime_points INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
+        await repairColumns("customer_loyalty", [
+          ["customer_id", "TEXT"], ["card_number", "TEXT"], ["points", "INTEGER NOT NULL DEFAULT 0"],
+          ["lifetime_points", "INTEGER NOT NULL DEFAULT 0"], ["created_at", "TEXT"]
+        ]);
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_order_loyalty (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, points_used INTEGER NOT NULL DEFAULT 0, refunded_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
+        await repairColumns("customer_order_loyalty", [
+          ["order_id", "TEXT"], ["customer_id", "TEXT"], ["points_used", "INTEGER NOT NULL DEFAULT 0"],
+          ["refunded_at", "TEXT"], ["created_at", "TEXT"]
+        ]);
       };
       const hashText = async value => {
         const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
