@@ -2,7 +2,7 @@ const ALLOWED_ORIGINS = ["https://satoshii5.github.io", "https://trueshinee.gith
 const SYSTEM_PROMPT = [
   "Ты — вежливый русскоязычный AI-консультант клининговой компании TrueShine в Минске, Беларусь.",
   "Отвечай конкретно и дружелюбно, обычно 2–5 предложений. Не придумывай цены и обещания.",
-  "Цены на сайте — только предварительные ориентиры: экспресс-уборка 2,75 BYN/м² (минимум 88 BYN); поддерживающая 3,75 BYN/м²; генеральная 5,25 BYN/м² (минимум 125 BYN); после ремонта 6,5 BYN/м² (минимум 250 BYN); после пожара 6,25 BYN/м² (минимум 375 BYN); генеральная уборка кухни от 200 BYN. Подписки: Базовый 224 BYN, Комфорт 388 BYN, Премиум 714 BYN в месяц. Всегда уточняй, что окончательная стоимость подтверждается после уточнения объекта.",
+  "Цены на сайте — только предварительные ориентиры: экспресс-уборка 2,75 BYN/м² (минимум 88 BYN); поддерживающая 3,75 BYN/м²; генеральная 5,25 BYN/м² (минимум 125 BYN); после ремонта 6,5 BYN/м² (минимум 250 BYN); после пожара 6,25 BYN/м² (минимум 375 BYN); генеральная уборка кухни от 200 BYN. Подписки: Базовый 291,20 BYN, Комфорт 504,40 BYN, Премиум 928,20 BYN в месяц. Всегда уточняй, что окончательная стоимость подтверждается после уточнения объекта.",
   "В калькуляторе отдельные процентные дополнительные услуги могут увеличивать расчёт на 20% каждая; фиксированные дополнения рассчитываются отдельно. Не обещай точную смету без данных об объекте и составе работ.",
   "Услуги: поддерживающая и генеральная уборка, уборка после ремонта и пожара, генеральная уборка кухни, химчистка мебели, чистка ковролина, комплексный клининг и аутсорсинг персонала.",
   "Телефоны: +375 33 684-88-44 и +375 25 908-51-27. Не утверждай, что заявка уже отправлена, пока сервер не подтвердил отправку.",
@@ -260,7 +260,7 @@ export default {
           const key=String(body.service||""),area=Number(body.area||0),address=clean(body.address),comment=clean(body.comment),rawDate=String(body.serviceAt||"");
           const date=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawDate)?new Date(rawDate+":00+03:00"):new Date(NaN);
           if(address.length<5||!Number.isFinite(date.getTime())||date.getTime()<=Date.now()) return json({error:"Укажите адрес и будущие дату и время (время Минска)."},400,origin);
-          const rules={express:["Экспресс-уборка",2.75,88],maintenance:["Поддерживающая уборка",3.75,0],general:["Генеральная уборка",5.25,125],renovation:["Уборка после ремонта",6.5,250],fire:["Уборка после пожара",6.25,375],kitchen:["Генеральная уборка кухни",0,200],subscription_basic:["Подписка «Базовый»",0,224],subscription_comfort:["Подписка «Комфорт»",0,388],subscription_premium:["Подписка «Премиум»",0,714]};
+          const rules={express:["Экспресс-уборка",2.75,88],maintenance:["Поддерживающая уборка",3.75,0],general:["Генеральная уборка",5.25,125],renovation:["Уборка после ремонта",6.5,250],fire:["Уборка после пожара",6.25,375],kitchen:["Генеральная уборка кухни",0,200],subscription_basic:["Подписка «Базовый»",0,291.2],subscription_comfort:["Подписка «Комфорт»",0,504.4],subscription_premium:["Подписка «Премиум»",0,928.2]};
           const rule=rules[key]; if(!rule&&!["upholstery","carpet","business","other"].includes(key)) return json({error:"Выберите услугу из списка."},400,origin);
           if(rule&&rule[1]>0&&(!Number.isFinite(area)||area<1||area>10000)) return json({error:"Укажите площадь от 1 до 10000 м²."},400,origin);
           const base=rule?(rule[1]>0?Math.max(rule[2],rule[1]*area):rule[2]):0;
@@ -286,6 +286,7 @@ export default {
           return json({ ok: true }, 200, origin);
         }
       } catch (error) {
+        console.error("[TrueShine] Account handler failed", { path: url.pathname, message: String(error?.message || "unknown").slice(0, 300) });
         if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({ error: "Аккаунт с таким email или телефоном уже зарегистрирован." }, 409, origin);
         return json({ error: "Не удалось обработать аккаунт. Попробуйте позже." }, 500, origin);
       }
@@ -431,6 +432,7 @@ export default {
           return json({ok:true,queued:true,id,message:"Queued only; no SMS provider is configured."},202,origin);
         }
       } catch (error) {
+        console.error("[TrueShine] CRM request failed", { path: url.pathname, message: String(error?.message || "unknown").slice(0, 300) });
         if (String(error?.message || "").includes("UNIQUE constraint failed")) return json({error:"A customer with this phone number already exists"},409,origin);
         return json({error:"CRM database request failed"},500,origin);
       }
