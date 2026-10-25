@@ -1,4 +1,5 @@
 const ALLOWED_ORIGINS = ["https://satoshii5.github.io", "https://trueshinee.github.io"];
+// Security controls: strict origin allowlist, hashed-IP API rate limits, expiring sessions, token-gated CRM routes, and transactional loyalty redemption.
 const SYSTEM_PROMPT = [
   "Ты — вежливый русскоязычный AI-консультант клининговой компании TrueShine в Минске, Беларусь.",
   "Отвечай конкретно и дружелюбно, обычно 2–5 предложений. Не придумывай цены и обещания.",
