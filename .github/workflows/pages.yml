@@ -19,6 +19,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Node for validation
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate Worker syntax
+        run: |
+          cp worker.js worker-check.mjs
+          node --check worker-check.mjs
+          rm worker-check.mjs
+      - name: Run website and CRM regression checks
+        run: node scripts/site-check.mjs
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
