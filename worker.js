@@ -209,31 +209,29 @@ export default {
           if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\+[1-9]\d{6,14}$/.test(phone) || password.length < 10 || password.length > 128) return json({ error: "Укажите имя, корректный email, телефон в международном формате и пароль от 10 символов." }, 400, origin);
           const existingAccount = await env.DB.prepare("SELECT id FROM customer_accounts WHERE email=? COLLATE NOCASE OR phone_norm=?").bind(email, phoneNorm).first();
           if (existingAccount) return json({ error: "Аккаунт с таким email или телефоном уже существует. Войдите в аккаунт." }, 409, origin);
-          const all = await env.DB.prepare("SELECT id,name,phone,email FROM customers WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 5000").all();
+          const all = await env.DB.prepare("SELECT id,phone,email FROM customers WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 5000").all();
           const rows = all.results || [];
-          const byPhone = rows.find(c => normalizePhone(c.phone) === phoneNorm);
-          const byEmail = rows.find(c => String(c.email || "").trim().toLowerCase() === email);
-          if (byPhone && byEmail && byPhone.id !== byEmail.id) {
-            return json({ error: "Телефон и email в CRM относятся к разным карточкам. Свяжитесь с TrueShine, чтобы мы безопасно связали аккаунт." }, 409, origin);
-          }
-          let customer = byPhone || byEmail;
-          if (customer && byEmail && normalizePhone(customer.phone) !== phoneNorm) {
-            return json({ error: "Email уже указан в CRM с другим номером телефона. Проверьте данные или свяжитесь с TrueShine." }, 409, origin);
+          const matchingCustomer = rows.find(c =>
+            (phoneNorm && normalizePhone(c.phone) === phoneNorm) ||
+            (email && String(c.email || "").trim().toLowerCase() === email)
+          );
+          if (matchingCustomer) {
+            return json({ error: "Эти данные уже есть в TrueShine. Чтобы защитить ваши заказы и бонусы, самостоятельная привязка существующей карточки отключена. Свяжитесь с TrueShine для безопасной проверки и подключения личного кабинета." }, 409, origin);
           }
           const now = new Date().toISOString();
-          if (!customer) {
-            const id = crypto.randomUUID();
-            await env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)")
-              .bind(id, name, phone, email, now, now).run();
-            customer = { id };
-          } else {
-            await env.DB.prepare("UPDATE customers SET email=COALESCE(NULLIF(email,''),?),updated_at=? WHERE id=?").bind(email, now, customer.id).run();
-          }
-          const accountId = crypto.randomUUID(), salt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
-          await env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)")
-            .bind(accountId, customer.id, email, phoneNorm, salt, await passwordHash(password, salt), now).run();
+          const customerId = crypto.randomUUID();
+          const accountId = crypto.randomUUID();
+          const salt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
+          const passwordDigest = await passwordHash(password, salt);
           const cardNumber = "TS-" + Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
-          await env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)").bind(customer.id,cardNumber,now).run();
+          await env.DB.batch([
+            env.DB.prepare("INSERT INTO customers (id,name,phone,email,telegram_chat_id,language,notes,sms_consent,sms_consent_at,client_status,discount_percent,created_at,updated_at) VALUES (?,?,?,?,NULL,'ru','Регистрация на сайте',0,NULL,'Новый',0,?,?)")
+              .bind(customerId, name, phone, email, now, now),
+            env.DB.prepare("INSERT INTO customer_accounts (id,customer_id,email,phone_norm,password_salt,password_hash,created_at) VALUES (?,?,?,?,?,?,?)")
+              .bind(accountId, customerId, email, phoneNorm, salt, passwordDigest, now),
+            env.DB.prepare("INSERT OR IGNORE INTO customer_loyalty (customer_id,card_number,points,lifetime_points,created_at) VALUES (?,?,0,0,?)")
+              .bind(customerId, cardNumber, now)
+          ]);
           const session = await issueSession(accountId);
           return json({ ok: true, token: session, message: "Аккаунт создан", customer: { name, email, phone } }, 201, origin);
         }
