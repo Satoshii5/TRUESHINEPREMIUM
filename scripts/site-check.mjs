@@ -43,7 +43,7 @@ if (!worker.includes('"lead", 8, 10 * 60 * 1000')) fail.push("Lead form rate lim
 if (!worker.includes('"register" : "login", url.pathname === "/account/register" ? 5 : 10, 15 * 60 * 1000')) fail.push("Registration/login brute-force throttling was not found");
 if (!worker.includes("iterations: 150000, hash: \"SHA-256\"")) fail.push("PBKDF2 password hashing strength check was not found");
 if (!worker.includes("crypto.getRandomValues(new Uint8Array(32))")) fail.push("High-entropy session token generation was not found");
-if (!worker.includes('VALUES (?,?,?,?)").bind(await hashText(raw), accountId, expires, now.toISOString())')) fail.push("Session token hashing before storage was not found");
+if (!worker.includes('buildCompatibleInsert("customer_sessions", { token_hash: await hashText(raw), account_id: accountId, expires_at: expires, created_at: now.toISOString() })')) fail.push("Session token hashing before storage was not found");
 if (!worker.includes("password.length < 10 || password.length > 128")) fail.push("Registration password length validation was not found");
 if (!worker.includes("if (linked) return json({ error: \"Для этого телефона уже есть личный кабинет.") ||
     !worker.includes("const existingAccount = await env.DB.prepare(\"SELECT id FROM customer_accounts WHERE phone_norm=? OR (?<>'' AND email=? COLLATE NOCASE)\")")) {
