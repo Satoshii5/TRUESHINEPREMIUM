@@ -240,6 +240,47 @@ export default {
           }
         }
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE COLLATE NOCASE, phone_norm TEXT NOT NULL UNIQUE, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
+        // Repair account tables created by older Worker versions. CREATE TABLE IF NOT EXISTS
+        // does not add columns to an existing D1 table, which previously caused generic 500s.
+        const accountInfo = await env.DB.prepare("PRAGMA table_info(customer_accounts)").all();
+        const accountColumns = new Set((accountInfo.results || []).map(column => column.name));
+        const accountMigrations = [
+          ["email", "TEXT"],
+          ["phone_norm", "TEXT"],
+          ["password_salt", "TEXT"],
+          ["password_hash", "TEXT"],
+          ["created_at", "TEXT"]
+        ];
+        let addedPhoneNorm = false;
+        for (const [column, definition] of accountMigrations) {
+          if (!accountColumns.has(column)) {
+            await env.DB.prepare("ALTER TABLE customer_accounts ADD COLUMN " + column + " " + definition).run();
+            if (column === "phone_norm") addedPhoneNorm = true;
+          }
+        }
+        // Populate phone identity from existing CRM clients without deleting or replacing records.
+        // If historical duplicate accounts share a phone, preserve every row and assign the phone
+        // index to the oldest usable row only; registration will still detect the linked customer.
+        const legacyAccounts = await env.DB.prepare("SELECT a.id,a.phone_norm,c.phone FROM customer_accounts a LEFT JOIN customers c ON c.id=a.customer_id ORDER BY a.created_at ASC").all();
+        const claimedAccountPhones = new Set();
+        for (const account of (legacyAccounts.results || [])) {
+          const savedPhone = String(account.phone_norm || "");
+          const normalizedPhone = savedPhone || normalizePhone(account.phone);
+          if (!normalizedPhone) continue;
+          if (savedPhone) {
+            claimedAccountPhones.add(savedPhone);
+            continue;
+          }
+          if (claimedAccountPhones.has(normalizedPhone)) continue;
+          await env.DB.prepare("UPDATE customer_accounts SET phone_norm=? WHERE id=?").bind(normalizedPhone, account.id).run();
+          claimedAccountPhones.add(normalizedPhone);
+        }
+        try {
+          await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_accounts_phone_norm ON customer_accounts(phone_norm) WHERE phone_norm IS NOT NULL").run();
+        } catch (indexError) {
+          // Do not make login/register unavailable solely because old data has duplicate phone values.
+          console.error("[TrueShine] Account phone index migration deferred", { message: String(indexError?.message || "unknown").slice(0, 200) });
+        }
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(account_id) REFERENCES customer_accounts(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_loyalty (customer_id TEXT PRIMARY KEY, card_number TEXT NOT NULL UNIQUE, points INTEGER NOT NULL DEFAULT 0, lifetime_points INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS customer_order_loyalty (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, points_used INTEGER NOT NULL DEFAULT 0, refunded_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(customer_id) REFERENCES customers(id))").run();
