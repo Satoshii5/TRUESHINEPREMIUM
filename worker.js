@@ -368,6 +368,9 @@ export default {
       };
       try {
         await ensureTables();
+        if ((url.pathname === "/account/register" || url.pathname === "/account/login") && request.method === "POST") {
+          return json({ error: "Регистрация и вход в личный кабинет временно отключены." }, 410, origin);
+        }
         if (url.pathname === "/account/register" || url.pathname === "/account/login") {
           const rate = await checkRateLimit(env, request, url.pathname === "/account/register" ? "register" : "login", url.pathname === "/account/register" ? 5 : 10, 15 * 60 * 1000);
           if (!rate.allowed) return json({ error: "Слишком много попыток. Повторите через " + rate.retryAfter + " сек." }, 429, origin);
