@@ -33,6 +33,15 @@ if (!worker.includes('request.headers.get("Authorization") !== "Bearer " + env.C
   fail.push("CRM admin token guard was not found");
 }
 if (!worker.includes("s.expires_at>?")) fail.push("Session expiry check was not found");
+if (!worker.includes('if (["/account/register", "/account/login", "/account/me", "/account/orders"].includes(url.pathname))')) fail.push("Disabled customer-account endpoints are not guarded");
+if (!worker.includes('const id = safe(body.id), confirmPhone = safe(body.confirmPhone)')) fail.push("CRM client archive does not require phone confirmation");
+if (!worker.includes("normalizePhone(existing.phone) !== normalizePhone(confirmPhone)")) fail.push("CRM client archive does not verify the confirmation phone");
+if (!worker.includes("DELETE FROM customer_sessions WHERE account_id IN (SELECT id FROM customer_accounts WHERE customer_id=?)")) fail.push("CRM client archive does not invalidate existing customer sessions");
+if (!crm.includes("confirmPhone:typed.trim()")) fail.push("CRM client archive does not send the confirmed phone to the Worker");
+if (!worker.includes("после пожара 5 BYN/м² (минимум 300 BYN)")) fail.push("AI prompt fire-cleaning price does not match the calculator");
+if (!worker.includes('fire:["Уборка после пожара",5,300]')) fail.push("Account-order fire-cleaning price is inconsistent with the calculator");
+if (!html.includes("Math.max(300,area*5)")) fail.push("Calculator fire-cleaning price formula changed unexpectedly");
+if (html.includes("Пока он не настроен")) fail.push("Homepage still claims the lead server handler is not configured");
 if (!worker.includes("async function checkRateLimit")) fail.push("API rate limiting helper was not found");
 if (!worker.includes('"chat", 30, 10 * 60 * 1000')) fail.push("AI chat rate limit was not found");
 if (!worker.includes('"lead", 8, 10 * 60 * 1000')) fail.push("Lead form rate limit was not found");

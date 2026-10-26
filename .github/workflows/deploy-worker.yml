@@ -25,6 +25,41 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+      - name: Smoke-test deployed Worker access controls
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        run: |
+          set -euo pipefail
+          WORKER_URL="https://trueshine-telegram-leads.manjiros471.workers.dev"
+          CRM_STATUS="$(curl --silent --show-error --output /tmp/trueshine-crm-api.json --write-out '%{http_code}' "$WORKER_URL/crm/customers")"
+          if [ "$CRM_STATUS" != "401" ]; then
+            echo "::error::Unauthenticated CRM endpoint returned HTTP $CRM_STATUS; expected 401."
+            cat /tmp/trueshine-crm-api.json
+            exit 1
+          fi
+          LEAD_PREFLIGHT_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request OPTIONS \
+            --header 'Origin: https://satoshii5.github.io' --header 'Access-Control-Request-Method: POST' \
+            --header 'Access-Control-Request-Headers: content-type' "$WORKER_URL/lead")"
+          if [ "$LEAD_PREFLIGHT_STATUS" != "204" ]; then
+            echo "::error::Lead endpoint CORS preflight returned HTTP $LEAD_PREFLIGHT_STATUS; expected 204."
+            exit 1
+          fi
+          for PATH_NAME in register login orders; do
+            ACCOUNT_STATUS="$(curl --silent --show-error --output "/tmp/trueshine-account-$PATH_NAME.json" --write-out '%{http_code}' \
+              --request POST --header 'Origin: https://satoshii5.github.io' --header 'Content-Type: application/json' --data '{}' \
+              "$WORKER_URL/account/$PATH_NAME")"
+            if [ "$ACCOUNT_STATUS" != "410" ]; then
+              echo "::error::Disabled account endpoint /account/$PATH_NAME returned HTTP $ACCOUNT_STATUS; expected 410."
+              cat "/tmp/trueshine-account-$PATH_NAME.json"
+              exit 1
+            fi
+          done
+          ACCOUNT_ME_STATUS="$(curl --silent --show-error --output /tmp/trueshine-account-me.json --write-out '%{http_code}' "$WORKER_URL/account/me")"
+          if [ "$ACCOUNT_ME_STATUS" != "410" ]; then
+            echo "::error::Disabled account endpoint /account/me returned HTTP $ACCOUNT_ME_STATUS; expected 410."
+            cat /tmp/trueshine-account-me.json
+            exit 1
+          fi
+          echo "Worker runtime checks passed: CRM token gate returns 401; lead CORS preflight returns 204; disabled account data and authentication routes return 410."
       - name: Report missing Cloudflare credentials without exposing secrets
         if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
         run: |

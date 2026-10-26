@@ -3,7 +3,7 @@ const ALLOWED_ORIGINS = ["https://satoshii5.github.io", "https://trueshinee.gith
 const SYSTEM_PROMPT = [
   "Ты — вежливый русскоязычный AI-консультант клининговой компании TrueShine в Минске, Беларусь.",
   "Отвечай конкретно и дружелюбно, обычно 2–5 предложений. Не придумывай цены и обещания.",
-  "Цены на сайте — только предварительные ориентиры: экспресс-уборка 2,75 BYN/м² (минимум 88 BYN); поддерживающая 3,75 BYN/м²; генеральная 5,25 BYN/м² (минимум 125 BYN); после ремонта 6,5 BYN/м² (минимум 250 BYN); после пожара 6,25 BYN/м² (минимум 375 BYN); генеральная уборка кухни от 200 BYN. Подписки: Базовый 291,20 BYN, Комфорт 504,40 BYN, Премиум 928,20 BYN в месяц. Всегда уточняй, что окончательная стоимость подтверждается после уточнения объекта.",
+  "Цены на сайте — только предварительные ориентиры: экспресс-уборка 2,75 BYN/м² (минимум 88 BYN); поддерживающая 3,75 BYN/м²; генеральная 5,25 BYN/м² (минимум 125 BYN); после ремонта 6,5 BYN/м² (минимум 250 BYN); после пожара 5 BYN/м² (минимум 300 BYN); генеральная уборка кухни от 200 BYN. Подписки: Базовый 291,20 BYN, Комфорт 504,40 BYN, Премиум 928,20 BYN в месяц. Всегда уточняй, что окончательная стоимость подтверждается после уточнения объекта.",
   "В калькуляторе отдельные процентные дополнительные услуги могут увеличивать расчёт на 20% каждая; фиксированные дополнения рассчитываются отдельно. Не обещай точную смету без данных об объекте и составе работ.",
   "Услуги: поддерживающая и генеральная уборка, уборка после ремонта и пожара, генеральная уборка кухни, химчистка мебели, чистка ковролина, комплексный клининг и аутсорсинг персонала.",
   "Телефоны: +375 33 684-88-44 и +375 25 908-51-27. Не утверждай, что заявка уже отправлена, пока сервер не подтвердил отправку.",
@@ -210,6 +210,9 @@ export default {
       } catch (error) {
         return json({ error: "Telegram delivery is not configured or failed" }, 503, origin);
       }
+    }
+    if (["/account/register", "/account/login", "/account/me", "/account/orders"].includes(url.pathname)) {
+      return json({ error: "Регистрация и вход в личный кабинет временно отключены." }, 410, origin);
     }
     if (url.pathname.startsWith("/account/")) {
       if (!env.DB) return json({ error: "Сервис аккаунтов временно недоступен" }, 503, origin);
@@ -452,7 +455,7 @@ export default {
           const key=String(body.service||""),area=Number(body.area||0),address=clean(body.address),comment=clean(body.comment),rawDate=String(body.serviceAt||"");
           const date=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawDate)?new Date(rawDate+":00+03:00"):new Date(NaN);
           if(address.length<5||!Number.isFinite(date.getTime())||date.getTime()<=Date.now()) return json({error:"Укажите адрес и будущие дату и время (время Минска)."},400,origin);
-          const rules={express:["Экспресс-уборка",2.75,88],maintenance:["Поддерживающая уборка",3.75,0],general:["Генеральная уборка",5.25,125],renovation:["Уборка после ремонта",6.5,250],fire:["Уборка после пожара",6.25,375],kitchen:["Генеральная уборка кухни",0,200],subscription_basic:["Подписка «Базовый»",0,291.2],subscription_comfort:["Подписка «Комфорт»",0,504.4],subscription_premium:["Подписка «Премиум»",0,928.2]};
+          const rules={express:["Экспресс-уборка",2.75,88],maintenance:["Поддерживающая уборка",3.75,0],general:["Генеральная уборка",5.25,125],renovation:["Уборка после ремонта",6.5,250],fire:["Уборка после пожара",5,300],kitchen:["Генеральная уборка кухни",0,200],subscription_basic:["Подписка «Базовый»",0,291.2],subscription_comfort:["Подписка «Комфорт»",0,504.4],subscription_premium:["Подписка «Премиум»",0,928.2]};
           const rule=rules[key]; if(!rule&&!["upholstery","carpet","business","other"].includes(key)) return json({error:"Выберите услугу из списка."},400,origin);
           if(rule&&rule[1]>0&&(!Number.isFinite(area)||area<1||area>10000)) return json({error:"Укажите площадь от 1 до 10000 м²."},400,origin);
           const base=rule?(rule[1]>0?Math.max(rule[2],rule[1]*area):rule[2]):0;
@@ -527,10 +530,16 @@ export default {
           return json({ ok: true, id }, 201, origin);
         }
         if (url.pathname === "/crm/customers/archive" && request.method === "POST") {
-          const id = safe(body.id);
-          if (!id) return json({ error: "Customer ID is required" }, 400, origin);
-          const existing = await env.DB.prepare("SELECT id FROM customers WHERE id=?").bind(id).first();
+          const id = safe(body.id), confirmPhone = safe(body.confirmPhone);
+          if (!id || !confirmPhone) return json({ error: "Customer ID and phone confirmation are required" }, 400, origin);
+          const existing = await env.DB.prepare("SELECT id,phone FROM customers WHERE id=?").bind(id).first();
           if (!existing) return json({ error: "Customer not found" }, 404, origin);
+          if (normalizePhone(existing.phone) !== normalizePhone(confirmPhone)) return json({ error: "Phone confirmation does not match" }, 403, origin);
+          const accountsTable = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='customer_accounts'").first();
+          const sessionsTable = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='customer_sessions'").first();
+          if (accountsTable && sessionsTable) {
+            await env.DB.prepare("DELETE FROM customer_sessions WHERE account_id IN (SELECT id FROM customer_accounts WHERE customer_id=?)").bind(id).run();
+          }
           const result = await env.DB.prepare("UPDATE customers SET client_status='Удалён',sms_consent=0,sms_consent_at=NULL,updated_at=? WHERE id=?")
             .bind(new Date().toISOString(), id).run();
           if (!result.success || result.meta?.changes === 0) return json({ error: "Customer could not be archived" }, 500, origin);
